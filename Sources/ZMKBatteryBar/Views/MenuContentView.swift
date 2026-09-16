@@ -8,7 +8,8 @@ struct MenuContentView: View {
   let navigation: PanelNavigation
   var onLabelChange: () -> Void = {}
 
-  @State private var hideBatteryIcon = false
+  @State private var displayMode: StatusBarDisplayMode = .both
+  @State private var lowBatteryThreshold = AppSettings.defaultLowBatteryThreshold
   @State private var singleLineLayout = false
   @State private var swapBatteryIconPositions = false
   @State private var launchAtLogin = LaunchAtLogin.isEnabled
@@ -64,11 +65,27 @@ struct MenuContentView: View {
 
       Divider()
 
-      Toggle("Hide Battery Icon", isOn: $hideBatteryIcon)
-        .onChange(of: hideBatteryIcon) { _, newValue in
-          appSettings.showBatteryIcon = !newValue
-          onLabelChange()
-        }
+      Picker("Show", selection: $displayMode) {
+        Text("Icon").tag(StatusBarDisplayMode.icon)
+        Text("Both").tag(StatusBarDisplayMode.both)
+        Text("Percent").tag(StatusBarDisplayMode.percentage)
+      }
+      .pickerStyle(.segmented)
+      .onChange(of: displayMode) { _, newValue in
+        appSettings.statusBarDisplayMode = newValue
+        onLabelChange()
+      }
+
+      Stepper(
+        lowBatteryThreshold > 0 ? "Red below \(lowBatteryThreshold)%" : "Red highlight off",
+        value: $lowBatteryThreshold,
+        in: 0...50,
+        step: 5
+      )
+      .onChange(of: lowBatteryThreshold) { _, newValue in
+        appSettings.lowBatteryThreshold = newValue
+        onLabelChange()
+      }
 
       Toggle("Single Line Layout", isOn: $singleLineLayout)
         .onChange(of: singleLineLayout) { _, newValue in
@@ -114,7 +131,8 @@ struct MenuContentView: View {
     .padding(12)
     .frame(width: 260)
     .onAppear {
-      hideBatteryIcon = !appSettings.showBatteryIcon
+      displayMode = appSettings.statusBarDisplayMode
+      lowBatteryThreshold = appSettings.lowBatteryThreshold
       singleLineLayout = appSettings.singleLineLayout
       swapBatteryIconPositions = appSettings.swapBatteryIconPositions
     }
@@ -130,7 +148,7 @@ struct MenuContentView: View {
       Text(label)
         .lineLimit(1)
         .frame(width: 85, alignment: .leading)
-      BatteryIconView(level: level)
+      BatteryIconView(level: level, lowThreshold: appSettings.lowBatteryThreshold)
       Text(level.map { "\($0)%" } ?? "--")
         .monospacedDigit()
       Spacer()

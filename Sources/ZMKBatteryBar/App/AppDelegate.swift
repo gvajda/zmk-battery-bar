@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var lastRenderedRows: [StatusBarRow] = []
   private var renderTimer: Timer?
   private var panelLayoutScheduled = false
+  private var appearanceObservation: NSKeyValueObservation?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     bleManager = BLEManager(batteryState: batteryState, appSettings: appSettings)
@@ -24,6 +25,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       button.action = #selector(togglePanel(_:))
       button.target = self
       updateButtonImage()
+      // A full-color (non-template) image bakes in the label color, so it
+      // must be re-rendered when the menu bar switches light/dark.
+      appearanceObservation = button.observe(\.effectiveAppearance) { [weak self] _, _ in
+        MainActor.assumeIsolated {
+          self?.updateButtonImage()
+        }
+      }
     }
 
     renderTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
@@ -81,9 +89,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let renderScale = button.window?.screen?.backingScaleFactor
       ?? NSScreen.main?.backingScaleFactor
       ?? 2.0
+    let threshold = appSettings.lowBatteryThreshold
+    let anyLow = rows.contains { BatteryIconLayout.isLow($0.level, threshold: threshold) }
+    // Template images are tinted by the system, which would erase the red
+    // low-battery fill. Render in full color only when a red row exists,
+    // using the label color resolved under the status bar's own appearance.
+    var foregroundColor: Color?
+    if anyLow {
+      button.effectiveAppearance.performAsCurrentDrawingAppearance {
+        let resolved = NSColor(cgColor: NSColor.labelColor.cgColor) ?? .labelColor
+        foregroundColor = Color(nsColor: resolved)
+      }
+    }
     let content = StatusBarView(
       rows: rows,
-      showBatteryIcon: appSettings.showBatteryIcon,
+      displayMode: appSettings.statusBarDisplayMode,
+      lowBatteryThreshold: threshold,
+      foregroundColor: foregroundColor,
       singleLine: appSettings.singleLineLayout
     )
     .environment(\.displayScale, renderScale)
@@ -95,7 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let image = NSImage(cgImage: cgImage,
                         size: NSSize(width: CGFloat(cgImage.width) / imageScale,
                                      height: CGFloat(cgImage.height) / imageScale))
-    image.isTemplate = true
+    image.isTemplate = !anyLow
     button.image = image
     // Cache only after the image actually reached the button, so a failed
     // render is retried on the next tick instead of being skipped as

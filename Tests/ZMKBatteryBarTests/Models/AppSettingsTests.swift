@@ -120,37 +120,46 @@ struct AppSettingsTests {
     #expect(settings.selectedKeyboard == nil)
   }
 
-  @Test("showBatteryIcon defaults to true when unset")
-  func showBatteryIconDefaultsTrue() {
+  @Test("statusBarDisplayMode defaults to both when unset")
+  func displayModeDefaultsBoth() {
     let settings = makeSettings()
-    #expect(settings.showBatteryIcon == true)
+    #expect(settings.statusBarDisplayMode == .both)
   }
 
-  @Test("showBatteryIcon persists false and reloads identical")
-  func showBatteryIconPersistsFalse() {
+  @Test("statusBarDisplayMode persists and reloads")
+  func displayModePersists() {
     let suiteName = "ZMKBatteryBarTests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defaults.removePersistentDomain(forName: suiteName)
 
-    let settingsWrite = AppSettings(defaults: defaults)
-    settingsWrite.showBatteryIcon = false
-
-    let settingsRead = AppSettings(defaults: defaults)
-    #expect(settingsRead.showBatteryIcon == false)
+    AppSettings(defaults: defaults).statusBarDisplayMode = .icon
+    #expect(AppSettings(defaults: defaults).statusBarDisplayMode == .icon)
   }
 
-  @Test("showBatteryIcon persists explicit true after being false")
-  func showBatteryIconPersistsTrueAfterFalse() {
+  @Test("legacy showBatteryIcon=false migrates to percentage mode")
+  func displayModeMigratesLegacyHiddenIcon() {
     let suiteName = "ZMKBatteryBarTests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
-    defer { defaults.removePersistentDomain(forName: suiteName) }
+    defaults.removePersistentDomain(forName: suiteName)
+    defaults.set(false, forKey: "showBatteryIcon")
 
-    let settingsWrite = AppSettings(defaults: defaults)
-    settingsWrite.showBatteryIcon = false
-    settingsWrite.showBatteryIcon = true
+    let settings = AppSettings(defaults: defaults)
+    #expect(settings.statusBarDisplayMode == .percentage)
+    // An explicit new-style choice wins over the legacy key.
+    settings.statusBarDisplayMode = .both
+    #expect(settings.statusBarDisplayMode == .both)
+  }
 
-    let settingsRead = AppSettings(defaults: defaults)
-    #expect(settingsRead.showBatteryIcon == true)
+  @Test("lowBatteryThreshold defaults to 10 and clamps to 0...100")
+  func lowBatteryThreshold() {
+    let settings = makeSettings()
+    #expect(settings.lowBatteryThreshold == 10)
+    settings.lowBatteryThreshold = 150
+    #expect(settings.lowBatteryThreshold == 100)
+    settings.lowBatteryThreshold = -3
+    #expect(settings.lowBatteryThreshold == 0)
+    settings.lowBatteryThreshold = 20
+    #expect(settings.lowBatteryThreshold == 20)
   }
 
   @Test("swapBatteryIconPositions defaults to false when unset")

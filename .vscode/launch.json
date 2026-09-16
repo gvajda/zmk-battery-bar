@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:zmk-battery-bar}",
+            "name": "Debug ZMKBatteryBar",
+            "target": "ZMKBatteryBar",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug ZMKBatteryBar"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:zmk-battery-bar}",
+            "name": "Release ZMKBatteryBar",
+            "target": "ZMKBatteryBar",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release ZMKBatteryBar"
+        }
+    ]
+}
