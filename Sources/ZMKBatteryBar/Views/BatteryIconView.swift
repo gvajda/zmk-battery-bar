@@ -7,6 +7,13 @@ enum BatteryIconLayout {
     return min(max(level, 0), 100)
   }
 
+  /// True when `level` is known and at or below `threshold`; a threshold of 0
+  /// disables the highlight.
+  static func isLow(_ level: Int?, threshold: Int) -> Bool {
+    guard threshold > 0, let level else { return false }
+    return level <= threshold
+  }
+
   static func snap(_ value: CGFloat, scale: CGFloat) -> CGFloat {
     let scale = max(scale, 1)
     return (value * scale).rounded() / scale
@@ -18,6 +25,10 @@ struct BatteryIconView: View {
 
   let level: Int?
   var size: CGSize = CGSize(width: 20, height: 9)
+  /// Levels at or below this are drawn red. 0 disables.
+  var lowThreshold: Int = 0
+  /// Explicit (already appearance-resolved) tint; defaults to the label color.
+  var tint: Color? = nil
 
   private let strokeWidth: CGFloat = 0.75
   private let nubWidth: CGFloat = 1.5
@@ -26,7 +37,8 @@ struct BatteryIconView: View {
   private let bodyCornerRadius: CGFloat = 2
 
   private var iconColor: Color {
-    Color(nsColor: .labelColor).opacity(0.8)
+    if BatteryIconLayout.isLow(level, threshold: lowThreshold) { return .red }
+    return (tint ?? Color(nsColor: .labelColor)).opacity(0.8)
   }
 
   private var scale: CGFloat {

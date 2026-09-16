@@ -153,6 +153,18 @@ struct AppSettingsTests {
     #expect(settingsRead.showBatteryIcon == true)
   }
 
+  @Test("lowBatteryThreshold defaults to 10 and clamps to 0...100")
+  func lowBatteryThreshold() {
+    let settings = makeSettings()
+    #expect(settings.lowBatteryThreshold == 10)
+    settings.lowBatteryThreshold = 150
+    #expect(settings.lowBatteryThreshold == 100)
+    settings.lowBatteryThreshold = -3
+    #expect(settings.lowBatteryThreshold == 0)
+    settings.lowBatteryThreshold = 20
+    #expect(settings.lowBatteryThreshold == 20)
+  }
+
   @Test("swapBatteryIconPositions defaults to false when unset")
   func swapBatteryIconPositionsDefaultsFalse() {
     let settings = makeSettings()
