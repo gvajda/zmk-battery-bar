@@ -7,7 +7,7 @@ struct StatusBarRow: Equatable {
 
 struct StatusBarView: View {
   let rows: [StatusBarRow]
-  var showBatteryIcon: Bool = true
+  var displayMode: StatusBarDisplayMode = .both
   /// When true, all rows are laid out on a single line (e.g. "C50% P50%")
   /// with a slightly larger font and a taller battery icon. The icon width is
   /// unchanged from the two-line layout.
@@ -61,11 +61,13 @@ struct StatusBarView: View {
   private func twoLineRow(label: String, level: Int?, digits: Int) -> some View {
     HStack(spacing: 1) {
       Text(label)
-      if showBatteryIcon {
+      if displayMode.showsIcon {
         BatteryIconView(level: level, size: CGSize(width: Self.iconWidth, height: Self.twoLineIconHeight))
           .padding(.trailing, 1)
       }
-      percentText(level: level, digits: digits)
+      if displayMode.showsPercentage || level == nil {
+        percentText(level: level, digits: digits)
+      }
     }
     .lineLimit(1)
     .fixedSize(horizontal: false, vertical: true)
@@ -74,11 +76,13 @@ struct StatusBarView: View {
   private func singleLineRow(label: String, level: Int?, digits: Int) -> some View {
     HStack(spacing: 1) {
       Text(label)
-      if showBatteryIcon {
+      if displayMode.showsIcon {
         BatteryIconView(level: level, size: CGSize(width: Self.iconWidth, height: Self.singleLineIconHeight))
           .padding(.trailing, 1)
       }
-      percentText(level: level, digits: digits, font: Self.singleLineFont)
+      if displayMode.showsPercentage || level == nil {
+        percentText(level: level, digits: digits, font: Self.singleLineFont)
+      }
     }
     .lineLimit(1)
     .fixedSize(horizontal: false, vertical: true)
