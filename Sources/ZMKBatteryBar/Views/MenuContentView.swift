@@ -9,6 +9,7 @@ struct MenuContentView: View {
   var onLabelChange: () -> Void = {}
 
   @State private var displayMode: StatusBarDisplayMode = .both
+  @State private var lowBatteryThreshold = AppSettings.defaultLowBatteryThreshold
   @State private var singleLineLayout = false
   @State private var swapBatteryIconPositions = false
   @State private var launchAtLogin = LaunchAtLogin.isEnabled
@@ -75,6 +76,17 @@ struct MenuContentView: View {
         onLabelChange()
       }
 
+      Stepper(
+        lowBatteryThreshold > 0 ? "Red below \(lowBatteryThreshold)%" : "Red highlight off",
+        value: $lowBatteryThreshold,
+        in: 0...50,
+        step: 5
+      )
+      .onChange(of: lowBatteryThreshold) { _, newValue in
+        appSettings.lowBatteryThreshold = newValue
+        onLabelChange()
+      }
+
       Toggle("Single Line Layout", isOn: $singleLineLayout)
         .onChange(of: singleLineLayout) { _, newValue in
           appSettings.singleLineLayout = newValue
@@ -120,6 +132,7 @@ struct MenuContentView: View {
     .frame(width: 260)
     .onAppear {
       displayMode = appSettings.statusBarDisplayMode
+      lowBatteryThreshold = appSettings.lowBatteryThreshold
       singleLineLayout = appSettings.singleLineLayout
       swapBatteryIconPositions = appSettings.swapBatteryIconPositions
     }
@@ -135,7 +148,7 @@ struct MenuContentView: View {
       Text(label)
         .lineLimit(1)
         .frame(width: 85, alignment: .leading)
-      BatteryIconView(level: level)
+      BatteryIconView(level: level, lowThreshold: appSettings.lowBatteryThreshold)
       Text(level.map { "\($0)%" } ?? "--")
         .monospacedDigit()
       Spacer()

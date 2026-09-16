@@ -11,6 +11,8 @@ enum StatusBarDisplayMode: String, CaseIterable {
 }
 
 final class AppSettings {
+  static let defaultLowBatteryThreshold = 10
+
   private let defaults: UserDefaults
 
   init(defaults: UserDefaults = .standard) {
@@ -24,6 +26,7 @@ final class AppSettings {
     static let swapBatteryIconPositions = "swapBatteryIconPositions"
     static let singleLineLayout = "singleLineLayout"
     static let statusBarDisplayMode = "statusBarDisplayMode"
+    static let lowBatteryThreshold = "lowBatteryThreshold"
   }
 
   /// What the menu bar rows show: icon only, icon + percentage, or percentage
@@ -42,6 +45,18 @@ final class AppSettings {
       return .both
     }
     set { defaults.set(newValue.rawValue, forKey: Keys.statusBarDisplayMode) }
+  }
+
+  /// Levels at or below this value (in percent) are drawn in red. 0 disables
+  /// the highlight. Defaults to 10.
+  var lowBatteryThreshold: Int {
+    get {
+      guard defaults.object(forKey: Keys.lowBatteryThreshold) != nil else {
+        return Self.defaultLowBatteryThreshold
+      }
+      return min(max(defaults.integer(forKey: Keys.lowBatteryThreshold), 0), 100)
+    }
+    set { defaults.set(min(max(newValue, 0), 100), forKey: Keys.lowBatteryThreshold) }
   }
 
   /// Whether the Central/Peripheral rows are swapped (reordered) in the menu
