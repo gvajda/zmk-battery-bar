@@ -1,3 +1,4 @@
+import Charts
 import Combine
 import SwiftUI
 
@@ -5,6 +6,7 @@ struct MenuContentView: View {
   @ObservedObject var bleManager: BLEManager
   let appSettings: AppSettings
   let batteryState: BatteryState
+  let batteryHistory: BatteryHistory
   let navigation: PanelNavigation
   var onLabelChange: () -> Void = {}
 
@@ -56,11 +58,14 @@ struct MenuContentView: View {
         batteryRow(label: label, level: stale ? nil : p.level, peripheralIndex: p.index, keyboard: keyboard)
       }
 
+      if let keyboard {
+        historyChart(keyboard: keyboard.uuid)
+      }
+
       if let lastUpdated = batteryState.lastUpdated {
         Text("Updated: \(TimeAgoFormatter.format(from: lastUpdated, now: now))")
           .font(.caption)
           .foregroundStyle(.secondary)
-          .onReceive(updateTimer) { now = $0 }
       }
 
       Divider()
@@ -130,7 +135,9 @@ struct MenuContentView: View {
     }
     .padding(12)
     .frame(width: 260)
+    .onReceive(updateTimer) { now = $0 }
     .onAppear {
+      now = Date()
       displayMode = appSettings.statusBarDisplayMode
       lowBatteryThreshold = appSettings.lowBatteryThreshold
       singleLineLayout = appSettings.singleLineLayout
@@ -151,6 +158,16 @@ struct MenuContentView: View {
       BatteryIconView(level: level, lowThreshold: appSettings.lowBatteryThreshold)
       Text(level.map { "\($0)%" } ?? "--")
         .monospacedDigit()
+      if let keyboard, level != nil,
+         let remaining = BatteryEstimator.remainingTime(
+           entries: batteryHistory.series(keyboard: keyboard.uuid, role: historyRole(peripheralIndex)),
+           now: now
+         ) {
+        Text("~\(BatteryEstimator.format(remaining))")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
       Spacer()
       if let keyboard {
         if batteryState.peripherals.count <= 1 {
@@ -172,6 +189,44 @@ struct MenuContentView: View {
           .id(labelStyleTick)
         }
       }
+    }
+  }
+
+  private func historyRole(_ peripheralIndex: Int?) -> String {
+    peripheralIndex.map { BatteryHistory.peripheralRole($0) } ?? BatteryHistory.centralRole
+  }
+
+  /// Level over the last week, one line per side. Levels are logged on change
+  /// only, so each series is extended to `now` at its last value.
+  @ViewBuilder
+  private func historyChart(keyboard: String) -> some View {
+    let since = now.addingTimeInterval(-7 * 86400)
+    let series: [(role: String, points: [BatteryHistoryEntry])] = batteryHistory.roles(keyboard: keyboard).map { role in
+      let all = batteryHistory.series(keyboard: keyboard, role: role)
+      var points = all.filter { $0.date >= since }
+      // Carry the level that was current at the window start into the window.
+      if let before = all.last(where: { $0.date < since }) {
+        points.insert(BatteryHistoryEntry(date: since, keyboard: keyboard, role: role, level: before.level), at: 0)
+      }
+      if let last = points.last {
+        points.append(BatteryHistoryEntry(date: now, keyboard: keyboard, role: role, level: last.level))
+      }
+      return (role, points)
+    }
+    if series.contains(where: { $0.points.count >= 2 }) {
+      Chart {
+        ForEach(series, id: \.role) { s in
+          ForEach(Array(s.points.enumerated()), id: \.offset) { _, e in
+            LineMark(x: .value("Time", e.date), y: .value("Level", e.level))
+              .foregroundStyle(by: .value("Side", BatteryHistory.displayName(role: s.role)))
+          }
+        }
+      }
+      .chartYScale(domain: 0...100)
+      .chartYAxis { AxisMarks(values: [0, 50, 100]) }
+      .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
+      .chartLegend(position: .bottom, spacing: 2)
+      .frame(height: 80)
     }
   }
 

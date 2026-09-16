@@ -61,7 +61,7 @@ Notes:
   - `BLEManager.swift` - CoreBluetooth central: scanning, connection, reconnect, battery notifications
   - `BatteryStateComposer.swift`, `BatteryPayload.swift`, `DescriptorRoleParser.swift`, `RoleAssigner.swift`, `ReconnectBackoff.swift` - pure logic extracted from BLEManager (see Testing)
 - `Sources/ZMKBatteryBar/Views/` - SwiftUI: `StatusBarView` (menu bar content), `MenuContentView` (panel), `KeyboardListView` (scan/save/manage keyboards), `BatteryIconView` (pixel-snapped battery icon)
-- `Sources/ZMKBatteryBar/Models/` - `BatteryState` (@Observable), `AppSettings` (UserDefaults-backed), `KeyboardDevice` (saved keyboard + label config), `PanelNavigation`
+- `Sources/ZMKBatteryBar/Models/` - `BatteryState` (@Observable), `AppSettings` (UserDefaults-backed), `KeyboardDevice` (saved keyboard + label config), `PanelNavigation`, `BatteryHistory` (change-only battery log persisted as CSV under `~/Library/Application Support/ZMK Battery Bar/battery-history.csv`; `BatteryEstimator` derives the remaining-time estimate shown in the panel)
 - `Sources/ZMKBatteryBar/Utilities/` - `LaunchAtLogin` (SMAppService), `StatusBarLayout`, `TimeAgoFormatter`
 
 ### ZMK/BLE domain notes
@@ -85,7 +85,8 @@ Notes:
 CoreBluetooth is not unit-testable, so BLE/UI logic that can be expressed as a
 pure function lives in small standalone enums/structs (`BatteryStateComposer`,
 `RoleAssigner`, `DescriptorRoleParser`, `ReconnectBackoff`, `BatteryPayload`,
-`StatusBarLayout`, `BatteryIconLayout`, `TimeAgoFormatter`) with tests under
+`StatusBarLayout`, `BatteryIconLayout`, `TimeAgoFormatter`, `BatteryHistoryCSV`,
+`BatteryEstimator`) with tests under
 `Tests/ZMKBatteryBarTests/` mirroring the source layout. When adding logic to
 `BLEManager` or views, prefer extracting it into a testable helper the same way.
 

@@ -39,6 +39,7 @@ final class BLEManager: NSObject, ObservableObject, @preconcurrency CBCentralMan
   private var centralManager: CBCentralManager!
   private var connectedPeripheral: CBPeripheral?
   private let batteryState: BatteryState
+  private let batteryHistory: BatteryHistory
   private let appSettings: AppSettings
   private var batteryCharacteristics: [CBCharacteristic] = []
   private var characteristicRoles: [CBCharacteristic: DeviceRole] = [:]
@@ -67,8 +68,9 @@ final class BLEManager: NSObject, ObservableObject, @preconcurrency CBCentralMan
 
   // MARK: - Init
 
-  init(batteryState: BatteryState, appSettings: AppSettings) {
+  init(batteryState: BatteryState, batteryHistory: BatteryHistory, appSettings: AppSettings) {
     self.batteryState = batteryState
+    self.batteryHistory = batteryHistory
     self.appSettings = appSettings
     super.init()
     self.centralManager = CBCentralManager(delegate: self, queue: nil)
@@ -277,6 +279,18 @@ final class BLEManager: NSObject, ObservableObject, @preconcurrency CBCentralMan
 
     if snapshot.shouldUpdateTimestamp {
       batteryState.lastUpdated = Date()
+    }
+
+    // Log level changes (BatteryHistory drops unchanged values itself).
+    if let keyboard = connectedPeripheral?.identifier.uuidString {
+      if let level = snapshot.centralLevel {
+        batteryHistory.record(keyboard: keyboard, role: BatteryHistory.centralRole, level: level)
+      }
+      for (index, p) in snapshot.peripherals.enumerated() {
+        if let level = p.level {
+          batteryHistory.record(keyboard: keyboard, role: BatteryHistory.peripheralRole(index), level: level)
+        }
+      }
     }
   }
 
