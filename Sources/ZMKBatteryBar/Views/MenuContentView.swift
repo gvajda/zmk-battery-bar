@@ -59,7 +59,7 @@ struct MenuContentView: View {
       }
 
       if let keyboard {
-        historyChart(keyboard: keyboard.uuid)
+        historySection(keyboard: keyboard.uuid)
       }
 
       if let lastUpdated = batteryState.lastUpdated {
@@ -158,16 +158,6 @@ struct MenuContentView: View {
       BatteryIconView(level: level, lowThreshold: appSettings.lowBatteryThreshold)
       Text(level.map { "\($0)%" } ?? "--")
         .monospacedDigit()
-      if let keyboard, level != nil,
-         let remaining = BatteryEstimator.remainingTime(
-           entries: batteryHistory.series(keyboard: keyboard.uuid, role: historyRole(peripheralIndex)),
-           now: now
-         ) {
-        Text("~\(BatteryEstimator.format(remaining))")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-      }
       Spacer()
       if let keyboard {
         if batteryState.peripherals.count <= 1 {
@@ -192,42 +182,69 @@ struct MenuContentView: View {
     }
   }
 
-  private func historyRole(_ peripheralIndex: Int?) -> String {
-    peripheralIndex.map { BatteryHistory.peripheralRole($0) } ?? BatteryHistory.centralRole
+  private static let chartDays = 8 * 7
+
+  /// Per side: a one-bar-per-day chart of the last 8 weeks (week boundaries
+  /// as gridlines, like the macOS battery panel) and the runtime estimate.
+  @ViewBuilder
+  private func historySection(keyboard: String) -> some View {
+    let roles = batteryHistory.roles(keyboard: keyboard)
+    if !roles.isEmpty {
+      Divider()
+      ForEach(roles, id: \.self) { role in
+        let entries = batteryHistory.series(keyboard: keyboard, role: role)
+        let estimate = BatteryEstimator.estimate(entries: entries, now: now)
+        HStack {
+          Text(BatteryHistory.displayName(role: role))
+          Spacer()
+          Text(estimateText(estimate))
+            .foregroundStyle(.secondary)
+        }
+        .font(.caption)
+        dailyChart(entries: entries)
+      }
+    }
   }
 
-  /// Level over the last week, one line per side. Levels are logged on change
-  /// only, so each series is extended to `now` at its last value.
-  @ViewBuilder
-  private func historyChart(keyboard: String) -> some View {
-    let since = now.addingTimeInterval(-7 * 86400)
-    let series: [(role: String, points: [BatteryHistoryEntry])] = batteryHistory.roles(keyboard: keyboard).map { role in
-      let all = batteryHistory.series(keyboard: keyboard, role: role)
-      var points = all.filter { $0.date >= since }
-      // Carry the level that was current at the window start into the window.
-      if let before = all.last(where: { $0.date < since }) {
-        points.insert(BatteryHistoryEntry(date: since, keyboard: keyboard, role: role, level: before.level), at: 0)
-      }
-      if let last = points.last {
-        points.append(BatteryHistoryEntry(date: now, keyboard: keyboard, role: role, level: last.level))
-      }
-      return (role, points)
+  private func estimateText(_ estimate: BatteryEstimate) -> String {
+    let points = "\(estimate.points) pts"
+    guard let remaining = estimate.remaining else { return "Not enough data · \(points)" }
+    return "~\(BatteryEstimator.format(remaining)) · \(Int(estimate.confidence * 100))% · \(points)"
+  }
+
+  private func dailyChart(entries: [BatteryHistoryEntry]) -> some View {
+    let calendar = Calendar.current
+    let today = calendar.startOfDay(for: now)
+    let start = calendar.date(byAdding: .day, value: -(Self.chartDays - 1), to: today) ?? today
+    let end = calendar.date(byAdding: .day, value: 1, to: today) ?? today
+    let buckets = BatteryHistoryDaily.buckets(entries: entries, days: Self.chartDays, now: now, calendar: calendar)
+    // Week boundaries as separators.
+    var weekStarts: [Date] = []
+    var cursor = calendar.dateInterval(of: .weekOfYear, for: start)?.start ?? start
+    while cursor < end {
+      if cursor >= start { weekStarts.append(cursor) }
+      cursor = calendar.date(byAdding: .weekOfYear, value: 1, to: cursor) ?? end
     }
-    if series.contains(where: { $0.points.count >= 2 }) {
-      Chart {
-        ForEach(series, id: \.role) { s in
-          ForEach(Array(s.points.enumerated()), id: \.offset) { _, e in
-            LineMark(x: .value("Time", e.date), y: .value("Level", e.level))
-              .foregroundStyle(by: .value("Side", BatteryHistory.displayName(role: s.role)))
-          }
-        }
-      }
-      .chartYScale(domain: 0...100)
-      .chartYAxis { AxisMarks(values: [0, 50, 100]) }
-      .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
-      .chartLegend(position: .bottom, spacing: 2)
-      .frame(height: 80)
+    let threshold = appSettings.lowBatteryThreshold
+    return Chart(buckets, id: \.day) { bucket in
+      BarMark(
+        x: .value("Day", bucket.day, unit: .day),
+        y: .value("Level", bucket.level),
+        width: .ratio(0.6)
+      )
+      .foregroundStyle(BatteryIconLayout.isLow(bucket.level, threshold: threshold) ? Color.red : Color.green)
     }
+    .chartXScale(domain: start...end)
+    .chartYScale(domain: 0...100)
+    .chartYAxis { AxisMarks(values: [0, 50, 100]) }
+    .chartXAxis {
+      AxisMarks(values: weekStarts) {
+        AxisGridLine()
+        AxisValueLabel(format: .dateTime.month(.abbreviated).day(), collisionResolution: .greedy)
+      }
+    }
+    .chartLegend(.hidden)
+    .frame(height: 48)
   }
 
   private func letterButton(_ letter: String, selected: Bool, action: @escaping () -> Void) -> some View {

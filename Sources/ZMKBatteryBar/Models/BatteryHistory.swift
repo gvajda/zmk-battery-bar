@@ -33,35 +33,123 @@ enum BatteryHistoryCSV {
   }
 }
 
-/// Linear runtime estimate over the current discharge cycle.
+/// Time-to-empty estimate from the level log.
+struct BatteryEstimate: Equatable {
+  /// Seconds until 0% measured from `now`; nil when there is not enough data.
+  let remaining: TimeInterval?
+  /// Number of logged readings for this side.
+  let points: Int
+  /// Total discharge time observed across all cycles.
+  let observedDischarge: TimeInterval
+  /// 0...1, grows with `observedDischarge`; 1 after `fullConfidenceSpan`.
+  var confidence: Double { min(observedDischarge / BatteryEstimator.fullConfidenceSpan, 1) }
+}
+
+/// Estimation follows what UPower, Android's BatteryStats and the usage-based
+/// patents do for percent-only data: discharge rate over the current cycle,
+/// blended with the rate seen in previous cycles, then `level / rate`.
+///
+/// - The log is split into discharge cycles at charge events.
+/// - The current cycle's rate is a least-squares slope through its readings
+///   plus a pseudo-reading at `now` (the level still holds), so a long flat
+///   stretch pulls the estimate up instead of being ignored.
+/// - Previous cycles contribute a span-weighted mean slope. The two are
+///   blended with a weight that moves to the current cycle as it accumulates
+///   time, so an estimate is available right after a charge and converges to
+///   this cycle's real usage over a few days.
 enum BatteryEstimator {
   /// A level increase of at least this many points between consecutive
   /// entries is treated as the start of a charge; readings can jitter by a
   /// point or two under load, so single-point bumps are not.
   static let chargeJump = 3
-  /// Minimum observed discharge before an estimate is offered.
-  static let minimumSpan: TimeInterval = 3600
-  static let minimumDrop = 2
+  /// A current cycle without history needs at least this much time before
+  /// its slope is trusted on its own.
+  static let minimumSpan: TimeInterval = 6 * 3600
+  /// Current-cycle span at which it carries equal weight with history.
+  static let blendHalfLife: TimeInterval = 2 * 86400
+  /// Observed discharge time that counts as full confidence.
+  static let fullConfidenceSpan: TimeInterval = 14 * 86400
 
-  /// Seconds until the level reaches 0 at the average discharge rate observed
-  /// since the last charge, measured from `now`. `nil` when there is not
-  /// enough discharge data yet. `entries` must be for one keyboard/role and
-  /// sorted by date ascending.
-  // ponytail: straight-line fit from the last charge; a per-segment or
-  // weighted-recent model can replace this if the estimate proves too jumpy.
-  static func remainingTime(entries: [BatteryHistoryEntry], now: Date) -> TimeInterval? {
-    guard let last = entries.last else { return nil }
-    var start = entries.count - 1
-    while start > 0, entries[start].level - entries[start - 1].level < chargeJump {
-      start -= 1
+  /// `entries` must be for one keyboard/role, sorted by date ascending.
+  static func estimate(entries: [BatteryHistoryEntry], now: Date) -> BatteryEstimate {
+    let none = BatteryEstimate(remaining: nil, points: entries.count, observedDischarge: 0)
+    guard let last = entries.last else { return none }
+
+    var cycles = cycles(entries)
+    var current = cycles.removeLast()
+    current.append(BatteryHistoryEntry(date: now, keyboard: last.keyboard, role: last.role, level: last.level))
+
+    let currentSpan = span(current)
+    let observed = cycles.reduce(currentSpan) { $0 + span($1) }
+
+    // Points per second, negative while discharging.
+    let currentRate = slope(current)
+    var historyRate: Double?
+    let weightedHistory = cycles.compactMap { cycle -> (rate: Double, weight: Double)? in
+      guard let rate = slope(cycle), rate < 0 else { return nil }
+      return (rate, span(cycle))
     }
-    let first = entries[start]
-    let drop = first.level - last.level
-    let span = last.date.timeIntervalSince(first.date)
-    guard drop >= minimumDrop, span >= minimumSpan else { return nil }
-    let secondsPerPoint = span / Double(drop)
-    let remaining = Double(last.level) * secondsPerPoint - now.timeIntervalSince(last.date)
-    return max(remaining, 0)
+    let historyWeight = weightedHistory.reduce(0) { $0 + $1.weight }
+    if historyWeight > 0 {
+      historyRate = weightedHistory.reduce(0) { $0 + $1.rate * $1.weight } / historyWeight
+    }
+
+    let rate: Double?
+    switch (currentRate, historyRate) {
+    case let (c?, h?):
+      let w = currentSpan / (currentSpan + blendHalfLife)
+      rate = w * c + (1 - w) * h
+    case let (c?, nil):
+      rate = currentSpan >= minimumSpan ? c : nil
+    case let (nil, h?):
+      rate = h
+    case (nil, nil):
+      rate = nil
+    }
+
+    guard let rate, rate < 0 else {
+      return BatteryEstimate(remaining: nil, points: entries.count, observedDischarge: observed)
+    }
+    return BatteryEstimate(
+      remaining: Double(last.level) / -rate,
+      points: entries.count,
+      observedDischarge: observed
+    )
+  }
+
+  /// Splits at every level increase of `chargeJump` or more.
+  static func cycles(_ entries: [BatteryHistoryEntry]) -> [[BatteryHistoryEntry]] {
+    var result: [[BatteryHistoryEntry]] = []
+    for entry in entries {
+      if let previous = result.last?.last, entry.level - previous.level < chargeJump {
+        result[result.count - 1].append(entry)
+      } else {
+        result.append([entry])
+      }
+    }
+    return result
+  }
+
+  private static func span(_ cycle: [BatteryHistoryEntry]) -> TimeInterval {
+    guard let first = cycle.first, let last = cycle.last else { return 0 }
+    return last.date.timeIntervalSince(first.date)
+  }
+
+  /// Ordinary least-squares slope of level over time (points per second).
+  static func slope(_ cycle: [BatteryHistoryEntry]) -> Double? {
+    guard cycle.count >= 2, let t0 = cycle.first?.date else { return nil }
+    let xs = cycle.map { $0.date.timeIntervalSince(t0) }
+    let ys = cycle.map { Double($0.level) }
+    let n = Double(xs.count)
+    let meanX = xs.reduce(0, +) / n
+    let meanY = ys.reduce(0, +) / n
+    var sxx = 0.0, sxy = 0.0
+    for (x, y) in zip(xs, ys) {
+      sxx += (x - meanX) * (x - meanX)
+      sxy += (x - meanX) * (y - meanY)
+    }
+    guard sxx > 0 else { return nil }
+    return sxy / sxx
   }
 
   /// Compact "3d 4h" / "5h" / "<1h" rendering.
@@ -70,6 +158,39 @@ enum BatteryEstimator {
     if hours < 1 { return "<1h" }
     if hours < 24 { return "\(hours)h" }
     return "\(hours / 24)d \(hours % 24)h"
+  }
+}
+
+/// Daily buckets for the history chart: the last known level on each calendar
+/// day, carried forward across days without readings.
+enum BatteryHistoryDaily {
+  struct Bucket: Equatable {
+    let day: Date
+    let level: Int
+  }
+
+  /// One bucket per day from `days - 1` days before `now` through today.
+  /// Days before the first reading are omitted. `entries` must be sorted.
+  static func buckets(
+    entries: [BatteryHistoryEntry], days: Int, now: Date, calendar: Calendar = .current
+  ) -> [Bucket] {
+    guard let first = entries.first else { return [] }
+    let today = calendar.startOfDay(for: now)
+    var result: [Bucket] = []
+    var index = 0
+    var level: Int?
+    for offset in stride(from: days - 1, through: 0, by: -1) {
+      guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { continue }
+      let dayEnd = calendar.date(byAdding: .day, value: 1, to: day) ?? day
+      while index < entries.count, entries[index].date < dayEnd {
+        level = entries[index].level
+        index += 1
+      }
+      if let level, first.date < dayEnd {
+        result.append(Bucket(day: day, level: level))
+      }
+    }
+    return result
   }
 }
 
