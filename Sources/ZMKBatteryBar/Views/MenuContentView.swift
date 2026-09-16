@@ -1,3 +1,4 @@
+import Charts
 import Combine
 import SwiftUI
 
@@ -5,6 +6,7 @@ struct MenuContentView: View {
   @ObservedObject var bleManager: BLEManager
   let appSettings: AppSettings
   let batteryState: BatteryState
+  let batteryHistory: BatteryHistory
   let navigation: PanelNavigation
   var onLabelChange: () -> Void = {}
 
@@ -55,11 +57,14 @@ struct MenuContentView: View {
         batteryRow(label: label, level: stale ? nil : p.level, peripheralIndex: p.index, keyboard: keyboard)
       }
 
+      if let keyboard {
+        historySection(keyboard: keyboard.uuid)
+      }
+
       if let lastUpdated = batteryState.lastUpdated {
         Text("Updated: \(TimeAgoFormatter.format(from: lastUpdated, now: now))")
           .font(.caption)
           .foregroundStyle(.secondary)
-          .onReceive(updateTimer) { now = $0 }
       }
 
       Divider()
@@ -113,7 +118,9 @@ struct MenuContentView: View {
     }
     .padding(12)
     .frame(width: 260)
+    .onReceive(updateTimer) { now = $0 }
     .onAppear {
+      now = Date()
       hideBatteryIcon = !appSettings.showBatteryIcon
       singleLineLayout = appSettings.singleLineLayout
       swapBatteryIconPositions = appSettings.swapBatteryIconPositions
@@ -155,6 +162,70 @@ struct MenuContentView: View {
         }
       }
     }
+  }
+
+  private static let chartDays = 8 * 7
+
+  /// Per side: a one-bar-per-day chart of the last 8 weeks (week boundaries
+  /// as gridlines, like the macOS battery panel) and the runtime estimate.
+  @ViewBuilder
+  private func historySection(keyboard: String) -> some View {
+    let roles = batteryHistory.roles(keyboard: keyboard)
+    if !roles.isEmpty {
+      Divider()
+      ForEach(roles, id: \.self) { role in
+        let entries = batteryHistory.series(keyboard: keyboard, role: role)
+        let estimate = BatteryEstimator.estimate(entries: entries, now: now)
+        HStack {
+          Text(BatteryHistory.displayName(role: role))
+          Spacer()
+          Text(estimateText(estimate))
+            .foregroundStyle(.secondary)
+        }
+        .font(.caption)
+        dailyChart(entries: entries)
+      }
+    }
+  }
+
+  private func estimateText(_ estimate: BatteryEstimate) -> String {
+    let points = "\(estimate.points) pts"
+    guard let remaining = estimate.remaining else { return "Not enough data · \(points)" }
+    return "~\(BatteryEstimator.format(remaining)) · \(Int(estimate.confidence * 100))% · \(points)"
+  }
+
+  private func dailyChart(entries: [BatteryHistoryEntry]) -> some View {
+    let calendar = Calendar.current
+    let today = calendar.startOfDay(for: now)
+    let start = calendar.date(byAdding: .day, value: -(Self.chartDays - 1), to: today) ?? today
+    let end = calendar.date(byAdding: .day, value: 1, to: today) ?? today
+    let buckets = BatteryHistoryDaily.buckets(entries: entries, days: Self.chartDays, now: now, calendar: calendar)
+    // Week boundaries as separators.
+    var weekStarts: [Date] = []
+    var cursor = calendar.dateInterval(of: .weekOfYear, for: start)?.start ?? start
+    while cursor < end {
+      if cursor >= start { weekStarts.append(cursor) }
+      cursor = calendar.date(byAdding: .weekOfYear, value: 1, to: cursor) ?? end
+    }
+    return Chart(buckets, id: \.day) { bucket in
+      BarMark(
+        x: .value("Day", bucket.day, unit: .day),
+        y: .value("Level", bucket.level),
+        width: .ratio(0.6)
+      )
+      .foregroundStyle(Color.green)
+    }
+    .chartXScale(domain: start...end)
+    .chartYScale(domain: 0...100)
+    .chartYAxis { AxisMarks(values: [0, 50, 100]) }
+    .chartXAxis {
+      AxisMarks(values: weekStarts) {
+        AxisGridLine()
+        AxisValueLabel(format: .dateTime.month(.abbreviated).day(), collisionResolution: .greedy)
+      }
+    }
+    .chartLegend(.hidden)
+    .frame(height: 48)
   }
 
   private func letterButton(_ letter: String, selected: Bool, action: @escaping () -> Void) -> some View {
