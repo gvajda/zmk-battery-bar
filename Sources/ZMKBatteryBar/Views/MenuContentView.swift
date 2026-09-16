@@ -10,6 +10,7 @@ struct MenuContentView: View {
   var onAutoSwitchChange: () -> Void = {}
 
   @State private var hideBatteryIcon = false
+  @State private var lowBatteryThreshold = AppSettings.defaultLowBatteryThreshold
   @State private var singleLineLayout = false
   @State private var swapBatteryIconPositions = false
   @State private var launchAtLogin = LaunchAtLogin.isEnabled
@@ -72,6 +73,17 @@ struct MenuContentView: View {
           appSettings.showBatteryIcon = !newValue
           onLabelChange()
         }
+
+      Stepper(
+        lowBatteryThreshold > 0 ? "Red below \(lowBatteryThreshold)%" : "Red highlight off",
+        value: $lowBatteryThreshold,
+        in: 0...50,
+        step: 5
+      )
+      .onChange(of: lowBatteryThreshold) { _, newValue in
+        appSettings.lowBatteryThreshold = newValue
+        onLabelChange()
+      }
 
       Toggle("Single Line Layout", isOn: $singleLineLayout)
         .onChange(of: singleLineLayout) { _, newValue in
@@ -141,6 +153,7 @@ struct MenuContentView: View {
     .frame(width: 260)
     .onAppear {
       hideBatteryIcon = !appSettings.showBatteryIcon
+      lowBatteryThreshold = appSettings.lowBatteryThreshold
       singleLineLayout = appSettings.singleLineLayout
       swapBatteryIconPositions = appSettings.swapBatteryIconPositions
       autoSwitchKeyboard = appSettings.autoSwitchKeyboard
@@ -164,7 +177,7 @@ struct MenuContentView: View {
       Text(label)
         .lineLimit(1)
         .frame(width: 85, alignment: .leading)
-      BatteryIconView(level: level)
+      BatteryIconView(level: level, lowThreshold: appSettings.lowBatteryThreshold)
       Text(level.map { "\($0)%" } ?? "--")
         .monospacedDigit()
       Spacer()

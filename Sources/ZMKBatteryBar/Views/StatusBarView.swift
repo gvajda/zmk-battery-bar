@@ -8,6 +8,11 @@ struct StatusBarRow: Equatable {
 struct StatusBarView: View {
   let rows: [StatusBarRow]
   var showBatteryIcon: Bool = true
+  /// Levels at or below this are drawn red. 0 disables.
+  var lowBatteryThreshold: Int = 0
+  /// Appearance-resolved text color, used when the image is rendered in full
+  /// color (a low battery is present) instead of as a template.
+  var foregroundColor: Color? = nil
   /// When true, all rows are laid out on a single line (e.g. "C50% P50%")
   /// with a slightly larger font and a taller battery icon. The icon width is
   /// unchanged from the two-line layout.
@@ -42,6 +47,7 @@ struct StatusBarView: View {
     // Horizontal slack so the ImageRenderer output does not clip glyph
     // overhang/antialiasing at the edges (notably the trailing "%").
     .padding(.horizontal, 1)
+    .foregroundStyle(foregroundColor ?? .primary)
     .allowsHitTesting(false)
   }
 
@@ -55,6 +61,7 @@ struct StatusBarView: View {
     .font(Self.singleLineFont)
     .frame(height: 22)
     .padding(.horizontal, 1)
+    .foregroundStyle(foregroundColor ?? .primary)
     .allowsHitTesting(false)
   }
 
@@ -62,8 +69,13 @@ struct StatusBarView: View {
     HStack(spacing: 1) {
       Text(label)
       if showBatteryIcon {
-        BatteryIconView(level: level, size: CGSize(width: Self.iconWidth, height: Self.twoLineIconHeight))
-          .padding(.trailing, 1)
+        BatteryIconView(
+          level: level,
+          size: CGSize(width: Self.iconWidth, height: Self.twoLineIconHeight),
+          lowThreshold: lowBatteryThreshold,
+          tint: foregroundColor
+        )
+        .padding(.trailing, 1)
       }
       percentText(level: level, digits: digits)
     }
@@ -75,8 +87,13 @@ struct StatusBarView: View {
     HStack(spacing: 1) {
       Text(label)
       if showBatteryIcon {
-        BatteryIconView(level: level, size: CGSize(width: Self.iconWidth, height: Self.singleLineIconHeight))
-          .padding(.trailing, 1)
+        BatteryIconView(
+          level: level,
+          size: CGSize(width: Self.iconWidth, height: Self.singleLineIconHeight),
+          lowThreshold: lowBatteryThreshold,
+          tint: foregroundColor
+        )
+        .padding(.trailing, 1)
       }
       percentText(level: level, digits: digits, font: Self.singleLineFont)
     }

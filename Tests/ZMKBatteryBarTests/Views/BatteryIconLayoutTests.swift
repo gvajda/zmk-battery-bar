@@ -36,4 +36,13 @@ struct BatteryIconLayoutTests {
   func snap(value: CGFloat, scale: CGFloat, expected: CGFloat) {
     #expect(BatteryIconLayout.snap(value, scale: scale) == expected)
   }
+
+  @Test("isLow: at or below threshold, unknown level and zero threshold never low")
+  func isLow() {
+    #expect(BatteryIconLayout.isLow(10, threshold: 10))
+    #expect(BatteryIconLayout.isLow(0, threshold: 10))
+    #expect(!BatteryIconLayout.isLow(11, threshold: 10))
+    #expect(!BatteryIconLayout.isLow(nil, threshold: 10))
+    #expect(!BatteryIconLayout.isLow(0, threshold: 0))
+  }
 }
