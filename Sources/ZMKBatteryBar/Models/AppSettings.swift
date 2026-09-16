@@ -1,5 +1,15 @@
 import Foundation
 
+/// What each row of the menu bar item shows.
+enum StatusBarDisplayMode: String, CaseIterable {
+  case icon
+  case both
+  case percentage
+
+  var showsIcon: Bool { self != .percentage }
+  var showsPercentage: Bool { self != .icon }
+}
+
 final class AppSettings {
   private let defaults: UserDefaults
 
@@ -13,16 +23,25 @@ final class AppSettings {
     static let showBatteryIcon = "showBatteryIcon"
     static let swapBatteryIconPositions = "swapBatteryIconPositions"
     static let singleLineLayout = "singleLineLayout"
+    static let statusBarDisplayMode = "statusBarDisplayMode"
   }
 
-  /// Whether the battery icon is drawn in the menu bar. When false, only the
-  /// label (C/P) and percentage are shown. Defaults to true.
-  var showBatteryIcon: Bool {
+  /// What the menu bar rows show: icon only, icon + percentage, or percentage
+  /// only. Defaults to `.both`. Migrates the legacy `showBatteryIcon == false`
+  /// setting to `.percentage`.
+  var statusBarDisplayMode: StatusBarDisplayMode {
     get {
-      guard defaults.object(forKey: Keys.showBatteryIcon) != nil else { return true }
-      return defaults.bool(forKey: Keys.showBatteryIcon)
+      if let raw = defaults.string(forKey: Keys.statusBarDisplayMode),
+         let mode = StatusBarDisplayMode(rawValue: raw) {
+        return mode
+      }
+      if defaults.object(forKey: Keys.showBatteryIcon) != nil,
+         defaults.bool(forKey: Keys.showBatteryIcon) == false {
+        return .percentage
+      }
+      return .both
     }
-    set { defaults.set(newValue, forKey: Keys.showBatteryIcon) }
+    set { defaults.set(newValue.rawValue, forKey: Keys.statusBarDisplayMode) }
   }
 
   /// Whether the Central/Peripheral rows are swapped (reordered) in the menu

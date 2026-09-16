@@ -83,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       ?? 2.0
     let content = StatusBarView(
       rows: rows,
-      showBatteryIcon: appSettings.showBatteryIcon,
+      displayMode: appSettings.statusBarDisplayMode,
       singleLine: appSettings.singleLineLayout
     )
     .environment(\.displayScale, renderScale)

@@ -8,7 +8,7 @@ struct MenuContentView: View {
   let navigation: PanelNavigation
   var onLabelChange: () -> Void = {}
 
-  @State private var hideBatteryIcon = false
+  @State private var displayMode: StatusBarDisplayMode = .both
   @State private var singleLineLayout = false
   @State private var swapBatteryIconPositions = false
   @State private var launchAtLogin = LaunchAtLogin.isEnabled
@@ -64,11 +64,16 @@ struct MenuContentView: View {
 
       Divider()
 
-      Toggle("Hide Battery Icon", isOn: $hideBatteryIcon)
-        .onChange(of: hideBatteryIcon) { _, newValue in
-          appSettings.showBatteryIcon = !newValue
-          onLabelChange()
-        }
+      Picker("Show", selection: $displayMode) {
+        Text("Icon").tag(StatusBarDisplayMode.icon)
+        Text("Both").tag(StatusBarDisplayMode.both)
+        Text("Percent").tag(StatusBarDisplayMode.percentage)
+      }
+      .pickerStyle(.segmented)
+      .onChange(of: displayMode) { _, newValue in
+        appSettings.statusBarDisplayMode = newValue
+        onLabelChange()
+      }
 
       Toggle("Single Line Layout", isOn: $singleLineLayout)
         .onChange(of: singleLineLayout) { _, newValue in
@@ -114,7 +119,7 @@ struct MenuContentView: View {
     .padding(12)
     .frame(width: 260)
     .onAppear {
-      hideBatteryIcon = !appSettings.showBatteryIcon
+      displayMode = appSettings.statusBarDisplayMode
       singleLineLayout = appSettings.singleLineLayout
       swapBatteryIconPositions = appSettings.swapBatteryIconPositions
     }
