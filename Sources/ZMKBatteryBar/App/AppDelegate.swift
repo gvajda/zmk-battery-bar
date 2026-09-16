@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var panel: StatusBarPanel!
 
   private let batteryState = BatteryState()
+  private let batteryHistory = BatteryHistory(fileURL: BatteryHistory.defaultFileURL)
   private let appSettings = AppSettings()
   private let panelNavigation = PanelNavigation()
   private var bleManager: BLEManager!
@@ -19,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var panelLayoutScheduled = false
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    bleManager = BLEManager(batteryState: batteryState, appSettings: appSettings)
+    bleManager = BLEManager(batteryState: batteryState, batteryHistory: batteryHistory, appSettings: appSettings)
 
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -40,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       bleManager: bleManager,
       appSettings: appSettings,
       batteryState: batteryState,
+      batteryHistory: batteryHistory,
       navigation: panelNavigation,
       onLabelChange: { [weak self] in
         MainActor.assumeIsolated {
