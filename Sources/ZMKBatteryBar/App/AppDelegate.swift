@@ -263,7 +263,11 @@ final class StatusBarPanel: NSPanel {
     }
   }
 
-  override var canBecomeKey: Bool { true }
+  // Never take key status: the panel only has mouse-driven controls, and a
+  // key panel would silently swallow keystrokes meant for the app the user
+  // was typing in (the panel is non-activating, so that app still looks
+  // focused). makeKeyAndOrderFront then just orders the panel front.
+  override var canBecomeKey: Bool { false }
 
   override func makeKeyAndOrderFront(_ sender: Any?) {
     removeMonitor()
