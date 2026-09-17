@@ -17,6 +17,7 @@ struct MenuContentView: View {
   @State private var launchAtLogin = LaunchAtLogin.isEnabled
   @State private var now = Date()
   @State private var labelStyleTick = 0
+  @State private var expandedEstimateRoles: Set<String> = []
 
   private let updateTimer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
@@ -199,11 +200,26 @@ struct MenuContentView: View {
           Spacer()
           Text(estimateText(estimate))
             .foregroundStyle(.secondary)
-          Image(systemName: "info.circle")
-            .foregroundStyle(.secondary)
-            .help(estimateDetail(estimate))
+          // Tooltips do not show in the non-key panel, so the details toggle.
+          Button {
+            if expandedEstimateRoles.contains(role) {
+              expandedEstimateRoles.remove(role)
+            } else {
+              expandedEstimateRoles.insert(role)
+            }
+          } label: {
+            Image(systemName: "info.circle")
+              .foregroundStyle(.secondary)
+          }
+          .buttonStyle(.plain)
         }
         .font(.caption)
+        if expandedEstimateRoles.contains(role) {
+          Text(estimateDetail(estimate))
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
         // Only the bottom chart carries dates; the others count weeks.
         dailyChart(entries: entries, weekNumbers: index < roles.count - 1)
       }
@@ -211,8 +227,8 @@ struct MenuContentView: View {
   }
 
   private func estimateText(_ estimate: BatteryEstimate) -> String {
-    guard let remaining = estimate.remaining else { return "Not enough data" }
-    return "~\(BatteryEstimator.format(remaining)) · conf \(Int(estimate.confidence * 100))%"
+    guard let remaining = estimate.remaining else { return "Est: not enough data" }
+    return "Est: ~\(BatteryEstimator.format(remaining)) · \(Int(estimate.confidence * 100))% confidence"
   }
 
   private func estimateDetail(_ estimate: BatteryEstimate) -> String {
