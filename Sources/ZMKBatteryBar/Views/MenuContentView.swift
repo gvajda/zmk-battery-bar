@@ -191,28 +191,38 @@ struct MenuContentView: View {
     let roles = batteryHistory.roles(keyboard: keyboard)
     if !roles.isEmpty {
       Divider()
-      ForEach(roles, id: \.self) { role in
+      ForEach(Array(roles.enumerated()), id: \.element) { index, role in
         let entries = batteryHistory.series(keyboard: keyboard, role: role)
         let estimate = BatteryEstimator.estimate(entries: entries, now: now)
-        HStack {
+        HStack(spacing: 4) {
           Text(BatteryHistory.displayName(role: role))
           Spacer()
           Text(estimateText(estimate))
             .foregroundStyle(.secondary)
+          Image(systemName: "info.circle")
+            .foregroundStyle(.secondary)
+            .help(estimateDetail(estimate))
         }
         .font(.caption)
-        dailyChart(entries: entries)
+        // Only the bottom chart carries dates; the others count weeks.
+        dailyChart(entries: entries, weekNumbers: index < roles.count - 1)
       }
     }
   }
 
   private func estimateText(_ estimate: BatteryEstimate) -> String {
-    let points = "\(estimate.points) pts"
-    guard let remaining = estimate.remaining else { return "Not enough data · \(points)" }
-    return "~\(BatteryEstimator.format(remaining)) · \(Int(estimate.confidence * 100))% · \(points)"
+    guard let remaining = estimate.remaining else { return "Not enough data" }
+    return "~\(BatteryEstimator.format(remaining)) · conf \(Int(estimate.confidence * 100))%"
   }
 
-  private func dailyChart(entries: [BatteryHistoryEntry]) -> some View {
+  private func estimateDetail(_ estimate: BatteryEstimate) -> String {
+    let observed = BatteryEstimator.format(estimate.observedDischarge)
+    let full = BatteryEstimator.format(BatteryEstimator.fullConfidenceSpan)
+    return "\(estimate.points) readings logged, \(observed) of discharge observed. "
+      + "Confidence reaches 100% after \(full) of discharge data."
+  }
+
+  private func dailyChart(entries: [BatteryHistoryEntry], weekNumbers: Bool) -> some View {
     let calendar = Calendar.current
     let today = calendar.startOfDay(for: now)
     let start = calendar.date(byAdding: .day, value: -(Self.chartDays - 1), to: today) ?? today
@@ -237,9 +247,17 @@ struct MenuContentView: View {
     .chartYScale(domain: 0...100)
     .chartYAxis { AxisMarks(values: [0, 50, 100]) }
     .chartXAxis {
-      AxisMarks(values: weekStarts) {
+      AxisMarks(values: weekStarts) { value in
         AxisGridLine()
-        AxisValueLabel(format: .dateTime.month(.abbreviated).day(), collisionResolution: .greedy)
+        if weekNumbers {
+          AxisValueLabel {
+            if let date = value.as(Date.self), let week = weekStarts.firstIndex(of: date) {
+              Text("W\(week + 1)")
+            }
+          }
+        } else {
+          AxisValueLabel(format: .dateTime.month(.abbreviated).day(), collisionResolution: .greedy)
+        }
       }
     }
     .chartLegend(.hidden)

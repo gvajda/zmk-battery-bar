@@ -117,15 +117,36 @@ enum BatteryEstimator {
     )
   }
 
-  /// Splits at every level increase of `chargeJump` or more.
+  /// Splits into discharge cycles. A charge is a cumulative rise of
+  /// `chargeJump` or more above the cycle's lowest level, so a charger that
+  /// reports +1 every few minutes is detected as well as a single jump. The
+  /// closed cycle ends at its last lowest reading, the rising run is skipped,
+  /// and the next cycle starts at its peak, so the charging ramp never enters
+  /// a fit.
   static func cycles(_ entries: [BatteryHistoryEntry]) -> [[BatteryHistoryEntry]] {
     var result: [[BatteryHistoryEntry]] = []
-    for entry in entries {
-      if let previous = result.last?.last, entry.level - previous.level < chargeJump {
-        result[result.count - 1].append(entry)
-      } else {
-        result.append([entry])
+    var i = 0
+    while i < entries.count {
+      var cycle = [entries[i]]
+      var lowest = entries[i].level
+      var j = i + 1
+      while j < entries.count, entries[j].level - lowest < chargeJump {
+        cycle.append(entries[j])
+        lowest = min(lowest, entries[j].level)
+        j += 1
       }
+      if j < entries.count {
+        // A charge follows: its first +1/+2 steps are already in the cycle,
+        // so cut the cycle at its last lowest reading.
+        let lastLow = cycle.lastIndex { $0.level == lowest }!
+        cycle.removeSubrange((lastLow + 1)...)
+      }
+      result.append(cycle)
+      // Charging: advance to the peak of the non-decreasing run.
+      while j + 1 < entries.count, entries[j + 1].level >= entries[j].level {
+        j += 1
+      }
+      i = j
     }
     return result
   }
