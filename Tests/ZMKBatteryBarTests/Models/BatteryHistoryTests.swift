@@ -38,10 +38,16 @@ struct BatteryEstimatorTests {
     }
   }
 
-  @Test("cycles split at charge jumps only")
+  @Test("cycles split at charge jumps, jitter stays in the cycle")
   func cycles() {
     let e = entries([(10, 60), (9, 58), (8, 59), (7, 50), (6, 100), (5, 99)])
     #expect(BatteryEstimator.cycles(e).map { $0.map(\.level) } == [[60, 58, 59, 50], [100, 99]])
+  }
+
+  @Test("a +1-step charging ramp is detected and excluded from the new cycle")
+  func steppedChargeRamp() {
+    let e = entries([(30, 85), (29, 84), (28, 85), (27, 86), (26, 87), (25, 88), (24, 96), (23, 97), (1, 96)])
+    #expect(BatteryEstimator.cycles(e).map { $0.map(\.level) } == [[85, 84], [97, 96]])
   }
 
   @Test("steady discharge: 1 point/hour, estimate measured from now")
