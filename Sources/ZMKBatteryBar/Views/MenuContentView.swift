@@ -19,7 +19,7 @@ struct MenuContentView: View {
   @State private var hasInputMonitoringAccess = ActiveKeyboardMonitor.hasAccess
   @State private var now = Date()
   @State private var labelStyleTick = 0
-  @State private var expandedEstimateRoles: Set<String> = []
+  @State private var showEstimateDetails = false
 
   private let updateTimer = Timer.publish(every: 10, on: .main, in: .common).autoconnect()
 
@@ -218,11 +218,7 @@ struct MenuContentView: View {
             .foregroundStyle(.secondary)
           // Tooltips do not show in the non-key panel, so the details toggle.
           Button {
-            if expandedEstimateRoles.contains(role) {
-              expandedEstimateRoles.remove(role)
-            } else {
-              expandedEstimateRoles.insert(role)
-            }
+            showEstimateDetails.toggle()
           } label: {
             Image(systemName: "info.circle")
               .foregroundStyle(.secondary)
@@ -230,7 +226,7 @@ struct MenuContentView: View {
           .buttonStyle(.plain)
         }
         .font(.caption)
-        if expandedEstimateRoles.contains(role) {
+        if showEstimateDetails {
           Text(estimateDetail(estimate))
             .font(.caption2)
             .foregroundStyle(.secondary)
