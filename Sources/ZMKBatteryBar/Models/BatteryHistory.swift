@@ -41,15 +41,40 @@ struct BatteryEstimate: Equatable {
   let points: Int
   /// Total discharge time observed across all cycles.
   let observedDischarge: TimeInterval
-  /// 0...1, grows with `observedDischarge`; 1 after `fullConfidenceSpan`.
-  var confidence: Double { min(observedDischarge / BatteryEstimator.fullConfidenceSpan, 1) }
+  /// Relative standard error of the discharge rate (0 = perfectly straight).
+  let relativeError: Double
+  /// Battery points seen discharging across all cycles.
+  let observedDrop: Int
+  /// Current level, the part the estimate still has to extrapolate over.
+  let level: Int
+
+  /// Share of the extrapolation that is backed by observation. sqrt keeps the
+  /// early numbers from sitting near zero for a week.
+  var coverage: Double {
+    let total = observedDrop + level
+    return total > 0 ? (Double(observedDrop) / Double(total)).squareRoot() : 0
+  }
+
+  /// 0...1: how straight the fit is, times how much of the battery has been
+  /// watched. Never reaches 1 while there is battery left to extrapolate.
+  var confidence: Double {
+    remaining == nil ? 0 : max(0, 1 - min(relativeError, 1)) * coverage
+  }
+
+  /// Half-width of the "± N" range: the estimate scaled by what confidence
+  /// leaves uncovered, so the range shrinks as confidence grows.
+  // ponytail: not a statistical interval; slope SE and coverage are folded
+  // into one number so the display and the ⓘ text agree.
+  var halfWidth: TimeInterval? {
+    remaining.map { $0 * (1 - confidence) }
+  }
 }
 
 /// Estimation follows what UPower, Android's BatteryStats and the usage-based
 /// patents do for percent-only data: discharge rate over the current cycle,
 /// blended with the rate seen in previous cycles, then `level / rate`.
 ///
-/// - The log is split into discharge cycles at charge events.
+/// - The log is split into discharge cycles at charge events (see `cycles`).
 /// - The current cycle's rate is a least-squares slope through its readings
 ///   plus a pseudo-reading at `now` (the level still holds), so a long flat
 ///   stretch pulls the estimate up instead of being ignored.
@@ -57,6 +82,8 @@ struct BatteryEstimate: Equatable {
 ///   blended with a weight that moves to the current cycle as it accumulates
 ///   time, so an estimate is available right after a charge and converges to
 ///   this cycle's real usage over a few days.
+/// - The fit's standard error and the share of battery actually observed
+///   drive `BatteryEstimate.confidence` and the ± range.
 enum BatteryEstimator {
   /// A level increase of at least this many points between consecutive
   /// entries is treated as the start of a charge; readings can jitter by a
@@ -67,13 +94,25 @@ enum BatteryEstimator {
   static let minimumSpan: TimeInterval = 6 * 3600
   /// Current-cycle span at which it carries equal weight with history.
   static let blendHalfLife: TimeInterval = 2 * 86400
-  /// Observed discharge time that counts as full confidence.
-  static let fullConfidenceSpan: TimeInterval = 14 * 86400
+  /// Relative error assumed for a history made of a single cycle (no spread
+  /// to measure) and for a current fit with too few points for a residual.
+  static let unknownRelativeError = 0.5
+
+  struct Fit: Equatable {
+    /// Points per second, negative while discharging.
+    let slope: Double
+    /// Standard error of `slope`; nil with fewer than 3 points.
+    let standardError: Double?
+  }
 
   /// `entries` must be for one keyboard/role, sorted by date ascending.
   static func estimate(entries: [BatteryHistoryEntry], now: Date) -> BatteryEstimate {
-    let none = BatteryEstimate(remaining: nil, points: entries.count, observedDischarge: 0)
-    guard let last = entries.last else { return none }
+    func none(observed: TimeInterval = 0, drop: Int = 0, level: Int = 0) -> BatteryEstimate {
+      BatteryEstimate(
+        remaining: nil, points: entries.count, observedDischarge: observed,
+        relativeError: 1, observedDrop: drop, level: level)
+    }
+    guard let last = entries.last else { return none() }
 
     var cycles = cycles(entries)
     var current = cycles.removeLast()
@@ -81,40 +120,60 @@ enum BatteryEstimator {
 
     let currentSpan = span(current)
     let observed = cycles.reduce(currentSpan) { $0 + span($1) }
+    let observedDrop = (cycles + [current]).reduce(0) { $0 + max(($1.first?.level ?? 0) - ($1.last?.level ?? 0), 0) }
 
-    // Points per second, negative while discharging.
-    let currentRate = slope(current)
-    var historyRate: Double?
-    let weightedHistory = cycles.compactMap { cycle -> (rate: Double, weight: Double)? in
-      guard let rate = slope(cycle), rate < 0 else { return nil }
-      return (rate, span(cycle))
+    let currentFit = fit(current)
+    let history = cycles.compactMap { cycle -> (rate: Double, weight: Double)? in
+      guard let f = fit(cycle), f.slope < 0 else { return nil }
+      return (f.slope, span(cycle))
     }
-    let historyWeight = weightedHistory.reduce(0) { $0 + $1.weight }
+    let historyWeight = history.reduce(0) { $0 + $1.weight }
+    var historyRate: Double?
+    var historyRelativeError = unknownRelativeError
     if historyWeight > 0 {
-      historyRate = weightedHistory.reduce(0) { $0 + $1.rate * $1.weight } / historyWeight
+      let mean = history.reduce(0) { $0 + $1.rate * $1.weight } / historyWeight
+      historyRate = mean
+      if history.count > 1 {
+        let variance = history.reduce(0) { $0 + $1.weight * ($1.rate - mean) * ($1.rate - mean) } / historyWeight
+        historyRelativeError = variance.squareRoot() / -mean
+      }
     }
 
     let rate: Double?
-    switch (currentRate, historyRate) {
+    let relativeError: Double
+    switch (currentFit, historyRate) {
     case let (c?, h?):
       let w = currentSpan / (currentSpan + blendHalfLife)
-      rate = w * c + (1 - w) * h
+      rate = w * c.slope + (1 - w) * h
+      relativeError = w * currentRelativeError(c) + (1 - w) * historyRelativeError
     case let (c?, nil):
-      rate = currentSpan >= minimumSpan ? c : nil
+      rate = currentSpan >= minimumSpan ? c.slope : nil
+      relativeError = currentRelativeError(c)
     case let (nil, h?):
       rate = h
+      relativeError = historyRelativeError
     case (nil, nil):
       rate = nil
+      relativeError = 1
     }
 
     guard let rate, rate < 0 else {
-      return BatteryEstimate(remaining: nil, points: entries.count, observedDischarge: observed)
+      return none(observed: observed, drop: observedDrop, level: last.level)
     }
     return BatteryEstimate(
       remaining: Double(last.level) / -rate,
       points: entries.count,
-      observedDischarge: observed
+      observedDischarge: observed,
+      relativeError: relativeError,
+      observedDrop: observedDrop,
+      level: last.level
     )
+  }
+
+  private static func currentRelativeError(_ f: Fit) -> Double {
+    guard f.slope < 0 else { return 1 }
+    guard let se = f.standardError else { return unknownRelativeError }
+    return se / -f.slope
   }
 
   /// Splits into discharge cycles. A charge is a cumulative rise of
@@ -156,8 +215,8 @@ enum BatteryEstimator {
     return last.date.timeIntervalSince(first.date)
   }
 
-  /// Ordinary least-squares slope of level over time (points per second).
-  static func slope(_ cycle: [BatteryHistoryEntry]) -> Double? {
+  /// Ordinary least-squares fit of level over time.
+  static func fit(_ cycle: [BatteryHistoryEntry]) -> Fit? {
     guard cycle.count >= 2, let t0 = cycle.first?.date else { return nil }
     let xs = cycle.map { $0.date.timeIntervalSince(t0) }
     let ys = cycle.map { Double($0.level) }
@@ -170,7 +229,14 @@ enum BatteryEstimator {
       sxy += (x - meanX) * (y - meanY)
     }
     guard sxx > 0 else { return nil }
-    return sxy / sxx
+    let slope = sxy / sxx
+    guard xs.count >= 3 else { return Fit(slope: slope, standardError: nil) }
+    let intercept = meanY - slope * meanX
+    let sse = zip(xs, ys).reduce(0.0) { acc, p in
+      let r = p.1 - (intercept + slope * p.0)
+      return acc + r * r
+    }
+    return Fit(slope: slope, standardError: (sse / (n - 2) / sxx).squareRoot())
   }
 
   /// Compact "3d 4h" / "5h" / "<1h" rendering.
@@ -179,6 +245,13 @@ enum BatteryEstimator {
     if hours < 1 { return "<1h" }
     if hours < 24 { return "\(hours)h" }
     return "\(hours / 24)d \(hours % 24)h"
+  }
+
+  /// Coarser "12d" / "5h" rendering for the estimate and its ± range.
+  static func formatCoarse(_ seconds: TimeInterval) -> String {
+    let hours = Int((seconds / 3600).rounded())
+    if hours < 24 { return "\(hours)h" }
+    return "\((seconds / 86400).rounded())d".replacingOccurrences(of: ".0d", with: "d")
   }
 }
 

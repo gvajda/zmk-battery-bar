@@ -223,15 +223,20 @@ struct MenuContentView: View {
   }
 
   private func estimateText(_ estimate: BatteryEstimate) -> String {
-    guard let remaining = estimate.remaining else { return "Est: not enough data" }
-    return "Est: ~\(BatteryEstimator.format(remaining)) · \(Int(estimate.confidence * 100))% confidence"
+    guard let remaining = estimate.remaining, let halfWidth = estimate.halfWidth else {
+      return "Est: not enough data"
+    }
+    return "Est: ~\(BatteryEstimator.formatCoarse(remaining)) ± \(BatteryEstimator.formatCoarse(halfWidth))"
   }
 
   private func estimateDetail(_ estimate: BatteryEstimate) -> String {
-    let observed = BatteryEstimator.format(estimate.observedDischarge)
-    let full = BatteryEstimator.format(BatteryEstimator.fullConfidenceSpan)
-    return "\(estimate.points) readings logged, \(observed) of discharge observed. "
-      + "Confidence reaches 100% after \(full) of discharge data."
+    let readings = "\(estimate.points) readings, \(BatteryEstimator.format(estimate.observedDischarge)) of discharge observed"
+    guard estimate.remaining != nil else { return readings + "." }
+    let confidence = Int((estimate.confidence * 100).rounded())
+    let slopeError = Int((min(estimate.relativeError, 1) * 100).rounded())
+    return "\(confidence)% confidence: discharge rate uncertain by ±\(slopeError)%, "
+      + "\(estimate.observedDrop) of \(estimate.observedDrop + estimate.level) battery points watched. "
+      + "The ± range is the estimate times the remaining \(100 - confidence)%. \(readings)."
   }
 
   private func dailyChart(entries: [BatteryHistoryEntry], weekNumbers: Bool) -> some View {
