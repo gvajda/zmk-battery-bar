@@ -93,20 +93,61 @@ struct BatteryEstimatorTests {
 
   @Test("blend converges to the current cycle as it grows")
   func blendConverges() {
-    // History: 1/h. Current cycle: 0.25/h over 20 days.
+    // History: 1/h. Current cycle: 0.05/h over 20 days (24 points).
     let hours = 20.0 * 24
-    let e = entries([(hours + 100, 100), (hours + 1, 1), (hours, 100), (0, 100 - Int(hours / 4))])
+    let e = entries([(hours + 100, 100), (hours + 1, 1), (hours, 100), (0, 76)])
     let est = BatteryEstimator.estimate(entries: e, now: now)
     let w = hours * 3600 / (hours * 3600 + BatteryEstimator.blendHalfLife)
-    let rate = w * 0.25 + (1 - w) * 1.0
-    expectClose(est.remaining, Double(100 - Int(hours / 4)) / rate * 3600, tolerance: 2)
-    #expect(est.confidence == 1)
+    let rate = w * 0.05 + (1 - w) * 1.0
+    expectClose(est.remaining, 76 / rate * 3600, tolerance: 2)
+    #expect(est.confidence > 0 && est.confidence < 1)
   }
 
-  @Test("confidence grows with observed discharge time")
-  func confidence() {
-    let e = entries([(7 * 24, 90), (0, 80)])
-    #expect(abs(BatteryEstimator.estimate(entries: e, now: now).confidence - 0.5) < 0.001)
+  @Test("a perfectly straight fit has zero error; confidence is then coverage")
+  func straightFit() {
+    let e = entries([(30, 100), (20, 90), (10, 80), (0, 70)])
+    let est = BatteryEstimator.estimate(entries: e, now: now)
+    #expect(est.relativeError < 1e-9)
+    #expect(est.observedDrop == 30)
+    #expect(est.level == 70)
+    #expect(abs(est.coverage - (30.0 / 100).squareRoot()) < 1e-9)
+    #expect(abs(est.confidence - est.coverage) < 1e-9)
+    #expect(abs(est.halfWidth! - est.remaining! * (1 - est.confidence)) < 1e-6)
+  }
+
+  @Test("a jittery fit lowers confidence and widens the range")
+  func jitteryFit() {
+    let straight = BatteryEstimator.estimate(entries: entries([(30, 100), (20, 90), (10, 80), (0, 70)]), now: now)
+    let jittery = BatteryEstimator.estimate(entries: entries([(30, 100), (20, 84), (10, 86), (0, 70)]), now: now)
+    #expect(jittery.relativeError > 0.01)
+    #expect(jittery.confidence < straight.confidence)
+    #expect(jittery.halfWidth! / jittery.remaining! > straight.halfWidth! / straight.remaining!)
+  }
+
+  @Test("confidence is zero without an estimate and never reaches one with battery left")
+  func confidenceBounds() {
+    #expect(BatteryEstimator.estimate(entries: entries([(5, 50)]), now: now).confidence == 0)
+    let e = entries([(300, 100), (200, 60), (100, 20), (0, 2)])
+    let est = BatteryEstimator.estimate(entries: e, now: now)
+    #expect(est.confidence > 0.9 && est.confidence < 1)
+  }
+
+  @Test("fit reports the slope standard error from the residuals")
+  func fitStandardError() {
+    let f = BatteryEstimator.fit(entries([(3, 4), (2, 2), (1, 3), (0, 1)]))!
+    // OLS on x=0,1,2,3 (hours) y=4,2,3,1: slope -0.8/h, residuals 0.3,-0.9,0.9,-0.3,
+    // SE = sqrt(SSE/(n-2)/Sxx) with SSE=1.8, Sxx=5.
+    #expect(abs(f.slope * 3600 + 0.8) < 1e-9)
+    #expect(abs(f.standardError! * 3600 - (1.8 / 2 / 5).squareRoot()) < 1e-9)
+    #expect(BatteryEstimator.fit(entries([(1, 4), (0, 2)]))!.standardError == nil)
+  }
+
+  @Test(
+    "coarse format",
+    arguments: [(1800.0, "1h"), (5 * 3600.0, "5h"), (23.6 * 3600.0, "1d"), (12.4 * 86400.0, "12d")]
+  )
+  func formatCoarse(seconds: TimeInterval, expected: String) {
+    #expect(BatteryEstimator.formatCoarse(seconds) == expected)
   }
 
   @Test(
