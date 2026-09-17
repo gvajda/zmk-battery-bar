@@ -89,9 +89,11 @@ enum BatteryEstimator {
   /// entries is treated as the start of a charge; readings can jitter by a
   /// point or two under load, so single-point bumps are not.
   static let chargeJump = 3
-  /// A current cycle without history needs at least this much time before
-  /// its slope is trusted on its own.
+  /// A cycle contributes a rate (as history, or on its own as the current
+  /// cycle) only with at least this much time and this much drop; a
+  /// half-hour blip before a charge would otherwise dominate the blend.
   static let minimumSpan: TimeInterval = 6 * 3600
+  static let minimumDrop = 2
   /// Current-cycle span at which it carries equal weight with history.
   static let blendHalfLife: TimeInterval = 2 * 86400
   /// Relative error assumed for a history made of a single cycle (no spread
@@ -124,7 +126,7 @@ enum BatteryEstimator {
 
     let currentFit = fit(current)
     let history = cycles.compactMap { cycle -> (rate: Double, weight: Double)? in
-      guard let f = fit(cycle), f.slope < 0 else { return nil }
+      guard isUsable(cycle), let f = fit(cycle), f.slope < 0 else { return nil }
       return (f.slope, span(cycle))
     }
     let historyWeight = history.reduce(0) { $0 + $1.weight }
@@ -147,7 +149,7 @@ enum BatteryEstimator {
       rate = w * c.slope + (1 - w) * h
       relativeError = w * currentRelativeError(c) + (1 - w) * historyRelativeError
     case let (c?, nil):
-      rate = currentSpan >= minimumSpan ? c.slope : nil
+      rate = isUsable(current) ? c.slope : nil
       relativeError = currentRelativeError(c)
     case let (nil, h?):
       rate = h
@@ -168,6 +170,11 @@ enum BatteryEstimator {
       observedDrop: observedDrop,
       level: last.level
     )
+  }
+
+  private static func isUsable(_ cycle: [BatteryHistoryEntry]) -> Bool {
+    guard let first = cycle.first, let last = cycle.last else { return false }
+    return span(cycle) >= minimumSpan && first.level - last.level >= minimumDrop
   }
 
   private static func currentRelativeError(_ f: Fit) -> Double {

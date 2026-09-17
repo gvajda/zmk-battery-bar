@@ -70,6 +70,18 @@ struct BatteryEstimatorTests {
     #expect(short.points == 2)
     // Flat level for a long time: slope 0, no history -> nothing to divide by.
     #expect(BatteryEstimator.estimate(entries: entries([(100, 50), (0, 50)]), now: now).remaining == nil)
+    // Jitter with no net drop over a long time must not yield an estimate.
+    #expect(BatteryEstimator.estimate(entries: entries([(18, 89), (15, 90), (1, 89)]), now: now).remaining == nil)
+  }
+
+  @Test("a short blip before a charge is not used as history")
+  func shortCycleIgnoredAsHistory() {
+    // 85 -> 84 in half an hour, charge to 97, then 97 -> 95 over 16 h.
+    let e = entries([(17, 85), (16.5, 84), (16, 97), (6, 96), (0, 95)])
+    let est = BatteryEstimator.estimate(entries: e, now: now)
+    // Rate must come from the current cycle alone, roughly 2 points / 16 h
+    // (the least-squares slope is not exactly the endpoint rate).
+    expectClose(est.remaining, 95 / (2.0 / 16) * 3600, tolerance: 10 * 3600)
   }
 
   @Test("a flat stretch since the last reading lengthens the estimate")
