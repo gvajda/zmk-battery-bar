@@ -212,13 +212,13 @@ struct MenuContentView: View {
   }
 
   private func estimateDetail(_ estimate: BatteryEstimate) -> String {
-    let readings = "\(estimate.points) readings, \(BatteryEstimator.format(estimate.observedDischarge)) of discharge observed"
-    guard estimate.remaining != nil else { return readings + "." }
+    let facts = "\(estimate.points) readings, \(BatteryEstimator.format(estimate.observedDischarge)) of discharge observed."
+    guard estimate.remaining != nil else { return facts }
     let confidence = Int((estimate.confidence * 100).rounded())
     let slopeError = Int((min(estimate.relativeError, 1) * 100).rounded())
-    return "\(confidence)% confidence: discharge rate uncertain by ±\(slopeError)%, "
+    return facts + " Estimation confidence \(confidence)%: discharge rate uncertain by ±\(slopeError)%, "
       + "\(estimate.observedDrop) of \(estimate.observedDrop + estimate.level) battery points watched. "
-      + "The ± range is the estimate times the remaining \(100 - confidence)%. \(readings)."
+      + "The ± range is the estimate times the remaining \(100 - confidence)%."
   }
 
   private func dailyChart(entries: [BatteryHistoryEntry], weekNumbers: Bool) -> some View {
