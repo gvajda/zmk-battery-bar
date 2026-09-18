@@ -107,8 +107,18 @@ enum BatteryEstimator {
     let standardError: Double?
   }
 
+  /// ZMK's split central reports level 0 for a peripheral whose link dropped
+  /// (`split_central_disconnected()` in `split/bluetooth/central.c`), and the
+  /// real level returns once it reconnects. A genuine discharge passes 3, 2, 1
+  /// first, so dropping every 0 loses nothing and keeps the blip out of the
+  /// cycle split, the fit, and the reading count.
+  static func readings(_ entries: [BatteryHistoryEntry]) -> [BatteryHistoryEntry] {
+    entries.filter { $0.level > 0 }
+  }
+
   /// `entries` must be for one keyboard/role, sorted by date ascending.
   static func estimate(entries: [BatteryHistoryEntry], now: Date) -> BatteryEstimate {
+    let entries = readings(entries)
     func none(observed: TimeInterval = 0, drop: Int = 0, level: Int = 0) -> BatteryEstimate {
       BatteryEstimate(
         remaining: nil, points: entries.count, observedDischarge: observed,
@@ -190,6 +200,7 @@ enum BatteryEstimator {
   /// and the next cycle starts at its peak, so the charging ramp never enters
   /// a fit.
   static func cycles(_ entries: [BatteryHistoryEntry]) -> [[BatteryHistoryEntry]] {
+    let entries = readings(entries)
     var result: [[BatteryHistoryEntry]] = []
     var i = 0
     while i < entries.count {
