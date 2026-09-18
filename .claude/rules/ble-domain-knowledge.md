@@ -44,6 +44,12 @@ them in `BLEManager`.
   layout, the old layout can persist until the keyboard is removed in System
   Settings → Bluetooth and re-paired. This matters for manual verification: a
   characteristic set that "should" have changed may not have.
+- **A dropped split link reports the peripheral at 0%.** The central's
+  `split_central_disconnected()` (`app/src/split/bluetooth/central.c`) queues a
+  battery event with `level = 0` for the peripheral half when it disconnects
+  (deep sleep, out of range); the real level returns on reconnect. The live
+  panel shows and the history logs this 0 as-is; only `BatteryEstimator`
+  filters level-0 readings, since a real discharge passes 3, 2, 1 first.
 - `nice_nano` vs `nice_nano_v2` measure the battery differently, so a v2 board
   built for the v1 target reports 0% permanently.
 - A keyboard keeps running well below a reported 0%, so 0% is not necessarily a
