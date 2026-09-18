@@ -60,6 +60,21 @@ struct BatteryEstimatorTests {
     expectClose(est.observedDischarge, 10 * 3600)
   }
 
+  @Test("a 0 from a dropped split link is ignored entirely")
+  func zeroFromPeripheralDisconnect() {
+    // ZMK central raises battery level 0 for a peripheral that disconnects;
+    // the level comes back once the link is up. Not a discharge, not a charge.
+    let clean = entries([(30, 89), (20, 88), (10, 87), (2, 87)])
+    let blip = entries([(30, 89), (20, 88), (10, 87), (6, 0), (2, 87)])
+    let expected = BatteryEstimator.estimate(entries: clean, now: now)
+    let actual = BatteryEstimator.estimate(entries: blip, now: now)
+    #expect(actual == expected)
+    #expect(actual.points == 4)
+    #expect(actual.observedDrop == 2)
+    #expect(actual.remaining! > 30 * 86400)
+    #expect(BatteryEstimator.cycles(blip).map { $0.map(\.level) } == [[89, 88, 87, 87]])
+  }
+
   @Test("no estimate without enough data")
   func insufficientData() {
     #expect(BatteryEstimator.estimate(entries: [], now: now).remaining == nil)
