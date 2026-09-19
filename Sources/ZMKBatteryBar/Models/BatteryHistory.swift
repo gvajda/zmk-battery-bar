@@ -286,6 +286,7 @@ enum BatteryHistoryDaily {
   static func buckets(
     entries: [BatteryHistoryEntry], days: Int, now: Date, calendar: Calendar = .current
   ) -> [Bucket] {
+    let entries = BatteryEstimator.readings(entries)
     guard let first = entries.first else { return [] }
     let today = calendar.startOfDay(for: now)
     var result: [Bucket] = []

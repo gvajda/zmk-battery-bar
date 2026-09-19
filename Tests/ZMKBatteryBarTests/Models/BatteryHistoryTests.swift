@@ -205,6 +205,22 @@ struct BatteryHistoryDailyTests {
     #expect(buckets.map(\.day) == [today.addingTimeInterval(-2 * day), today.addingTimeInterval(-day), today])
     #expect(BatteryHistoryDaily.buckets(entries: [], days: 5, now: now, calendar: calendar).isEmpty)
   }
+
+  @Test("a 0 from a dropped split link at the end of a day does not empty its bar")
+  func zeroFromPeripheralDisconnect() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    let day: TimeInterval = 86400
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let today = calendar.startOfDay(for: now)
+    let e = [
+      BatteryHistoryEntry(date: today.addingTimeInterval(-day + 3600), keyboard: "kb", role: "peripheral1", level: 85),
+      BatteryHistoryEntry(date: today.addingTimeInterval(-day + 82800), keyboard: "kb", role: "peripheral1", level: 0),
+      BatteryHistoryEntry(date: today.addingTimeInterval(600), keyboard: "kb", role: "peripheral1", level: 84),
+    ]
+    let buckets = BatteryHistoryDaily.buckets(entries: e, days: 3, now: now, calendar: calendar)
+    #expect(buckets.map(\.level) == [85, 84])
+  }
 }
 
 @Suite("BatteryHistory")

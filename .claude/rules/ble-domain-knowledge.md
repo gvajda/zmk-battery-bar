@@ -48,8 +48,9 @@ them in `BLEManager`.
   `split_central_disconnected()` (`app/src/split/bluetooth/central.c`) queues a
   battery event with `level = 0` for the peripheral half when it disconnects
   (deep sleep, out of range); the real level returns on reconnect. The live
-  panel shows and the history logs this 0 as-is; only `BatteryEstimator`
-  filters level-0 readings, since a real discharge passes 3, 2, 1 first.
+  panel shows and the history logs this 0 as-is; the estimate and the daily
+  chart drop level-0 readings (`BatteryEstimator.readings`), since a real
+  discharge passes 3, 2, 1 first.
 - `nice_nano` vs `nice_nano_v2` measure the battery differently, so a v2 board
   built for the v1 target reports 0% permanently.
 - A keyboard keeps running well below a reported 0%, so 0% is not necessarily a
