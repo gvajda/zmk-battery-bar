@@ -50,6 +50,9 @@ struct BatteryEstimate: Equatable {
   /// Calendar days with at least one reported drop. ZMK only samples the
   /// battery while the keyboard is active, so a drop means it was used.
   let usageDays: Int
+  /// Previous cycles behind the per-band curve; 0 when `remaining` comes from
+  /// a straight line.
+  let curveCycles: Int
 
   /// Share of one full charge (100 points) seen discharging. Once a whole
   /// battery's worth has been watched the rate is known across the curve.
@@ -97,6 +100,11 @@ struct BatteryEstimate: Equatable {
 ///   this cycle's real usage over a few days.
 /// - The fit's standard error and the share of battery actually observed
 ///   drive `BatteryEstimate.confidence` and the ± range.
+/// - Once previous cycles cover enough of the range, the straight line is
+///   replaced by a `Curve`: ZMK maps voltage to percent linearly, so the
+///   reported level falls fast near the top, slowly through the middle and
+///   several times faster again below ~60%. One slope over that overestimates
+///   the remaining time by 2-3x mid-cycle.
 enum BatteryEstimator {
   /// A level increase of at least this many points between consecutive
   /// entries is treated as the start of a charge. Readings jitter by a point
@@ -114,6 +122,57 @@ enum BatteryEstimator {
   /// Relative error assumed for a history made of a single cycle (no spread
   /// to measure) and for a current fit with too few points for a residual.
   static let unknownRelativeError = 0.5
+  /// 10-point bands previous cycles must have measured before the curve is
+  /// used; with less, a curve is mostly guesses from the nearest band.
+  static let minimumCurveBands = 5
+
+  /// Discharge pace per 10-point band (levels 1-10, 11-20, ..., 91-100),
+  /// learned from previous cycles. Bands without data borrow the nearest
+  /// measured band's pace.
+  struct Curve: Equatable {
+    /// Seconds per point, keyed by band index 0...9.
+    let secondsPerPoint: [Int: TimeInterval]
+    /// Previous cycles that measured at least one band.
+    let cycles: Int
+
+    /// Time to discharge from level `high` down to `low` at the learned pace.
+    func time(from high: Int, to low: Int) -> TimeInterval {
+      (0..<10).reduce(0) { total, band in
+        let points = min(high, band * 10 + 10) - max(low, band * 10)
+        guard points > 0 else { return total }
+        let nearest = secondsPerPoint.keys.min { (abs($0 - band), $0) < (abs($1 - band), $1) }!
+        return total + Double(points) * secondsPerPoint[nearest]!
+      }
+    }
+  }
+
+  /// Learns a `Curve` from closed cycles, or nil when they measure fewer than
+  /// `minimumCurveBands` bands. A band counts only when a cycle ran from its
+  /// top (or the cycle's starting peak) to its bottom; a cycle charged mid-band
+  /// may have sat idle there, which says nothing about the band's pace.
+  static func curve(_ cycles: [[BatteryHistoryEntry]]) -> Curve? {
+    var points: [Int: Int] = [:]
+    var time: [Int: TimeInterval] = [:]
+    var contributing = 0
+    for cycle in cycles {
+      guard let start = cycle.first else { continue }
+      func reached(_ level: Int) -> Date? { cycle.first { $0.level <= level }?.date }
+      var measured = false
+      for band in 0..<10 {
+        let low = band * 10
+        let top = min(low + 10, start.level)
+        guard top > low, let from = reached(top), let to = reached(low) else { continue }
+        points[band, default: 0] += top - low
+        time[band, default: 0] += to.timeIntervalSince(from)
+        measured = true
+      }
+      if measured { contributing += 1 }
+    }
+    var secondsPerPoint: [Int: TimeInterval] = [:]
+    for (band, t) in time where t > 0 { secondsPerPoint[band] = t / Double(points[band]!) }
+    guard secondsPerPoint.count >= minimumCurveBands else { return nil }
+    return Curve(secondsPerPoint: secondsPerPoint, cycles: contributing)
+  }
 
   struct Fit: Equatable {
     /// Points per second, negative while discharging.
@@ -139,7 +198,7 @@ enum BatteryEstimator {
     func none(observed: TimeInterval = 0, drop: Int = 0, level: Int = 0, days: Int = 0) -> BatteryEstimate {
       BatteryEstimate(
         remaining: nil, points: entries.count, observedDischarge: observed,
-        relativeError: 1, observedDrop: drop, level: level, usageDays: days)
+        relativeError: 1, observedDrop: drop, level: level, usageDays: days, curveCycles: 0)
     }
     guard let last = entries.last else { return none() }
 
@@ -192,14 +251,40 @@ enum BatteryEstimator {
     guard let rate, rate < 0 else {
       return none(observed: observed, drop: observedDrop, level: last.level, days: usageDays)
     }
+    // Curve: the history's per-band pace, scaled by how fast this cycle has
+    // run against the curve so far, blended in as the cycle accumulates time.
+    // ponytail: relativeError still comes from the straight-line fits; it
+    // tracks scatter, not curve error. Derive it from per-cycle pace spread if
+    // the ± range proves too narrow.
+    let curve = Self.curve(cycles.filter(isUsable))
+    var remaining = Double(last.level) / -rate
+    if let curve, let topBand = curve.secondsPerPoint.keys.max() {
+      // Pace is measured from the top of the highest measured band: a band
+      // the curve only borrows (e.g. 90-100 when no previous cycle started
+      // that high) falls at a different pace and would skew it.
+      // ponytail: a cycle below the lowest measured band still compares
+      // against borrowed pace there; the tail is short, so it is left in.
+      let from = min(current[0].level, topBand * 10 + 10)
+      var factor = 1.0
+      if let start = current.first(where: { $0.level <= from })?.date {
+        let span = now.timeIntervalSince(start)
+        let expected = curve.time(from: from, to: last.level)
+        if span >= minimumSpan, from - last.level >= minimumDrop, expected > 0 {
+          let w = span / (span + blendHalfLife)
+          factor = w * span / expected + 1 - w
+        }
+      }
+      remaining = curve.time(from: last.level, to: 0) * factor
+    }
     return BatteryEstimate(
-      remaining: Double(last.level) / -rate,
+      remaining: remaining,
       points: entries.count,
       observedDischarge: observed,
       relativeError: relativeError,
       observedDrop: observedDrop,
       level: last.level,
-      usageDays: usageDays
+      usageDays: usageDays,
+      curveCycles: curve?.cycles ?? 0
     )
   }
 

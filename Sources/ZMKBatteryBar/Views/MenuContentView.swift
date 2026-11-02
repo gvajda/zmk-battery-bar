@@ -236,7 +236,8 @@ struct MenuContentView: View {
       }
       if showEstimateDetails {
         Text("Est. counts calendar days; ± is the estimate × (100% − confidence). "
-          + "A day of use is a day with a reported drop.")
+          + "A day of use is a day with a reported drop. Curve: once past cycles "
+          + "cover enough of the range, Est. follows their drain per 10% band.")
           .font(.caption2)
           .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
@@ -259,6 +260,9 @@ struct MenuContentView: View {
         detailRow("Drain watched", "\(estimate.observedDrop)% of a charge")
         detailRow("Rate uncertainty", "±\(percent(min(estimate.relativeError, 1)))")
         detailRow("Confidence", percent(estimate.confidence))
+        detailRow("Model", estimate.curveCycles > 0
+          ? "curve from \(estimate.curveCycles) cycle\(estimate.curveCycles == 1 ? "" : "s")"
+          : "straight line")
       }
       if let days = estimate.daysPerFullCharge {
         detailRow("100% lasts", "~\(Int(days.rounded())) days of use")
