@@ -24,6 +24,7 @@ A macOS menu bar app that displays battery levels from ZMK split keyboards via B
 - **Hide battery icon** — Optionally hide the battery icons and show only the labels and percentages
 - **Swap battery positions** — Optionally swap the order of the two battery rows in the menu bar
 - **Auto-reconnect** — Automatically reconnects with exponential backoff when the keyboard disconnects
+- **Auto-switch to the active keyboard** — Optionally follow whichever saved keyboard you are typing on (requires the Input Monitoring permission; only the source device of each key press is read, never the keys themselves)
 - **Launch at Login** — Optional auto-start via SMAppService
 
 ## Requirements
@@ -41,7 +42,7 @@ brew install --cask itouuuuuuuuu/tap/zmk-battery-bar
 
 1. Launch ZMK Battery Bar — it appears in the menu bar with `C` and `P` battery levels
 2. Click the status bar item to open the popover
-3. If no keyboard is connected, click **Add Keyboard...** to scan for BLE devices
+3. If no keyboard is connected, click **Add Keyboard...**, then **Start Scan** to scan for BLE devices
 4. Select your ZMK keyboard from the discovered devices list
 5. Battery levels update automatically via BLE notifications
 
@@ -135,7 +136,7 @@ export APPLE_TEAM_ID="XXXXXXXXXX"
 | `Sources/.../BLE/` | CoreBluetooth manager, device discovery, battery reading |
 | `Sources/.../Views/` | SwiftUI views (status bar, popover, keyboard list) |
 | `Sources/.../Models/` | BatteryState (@Observable), AppSettings (UserDefaults), KeyboardDevice |
-| `Sources/.../Utilities/` | Launch at login (SMAppService wrapper) |
+| `Sources/.../Utilities/` | Launch at login (SMAppService wrapper), active-keyboard HID monitor |
 
 ## Sponsorship
 
