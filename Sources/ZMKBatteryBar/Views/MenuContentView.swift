@@ -245,13 +245,20 @@ struct MenuContentView: View {
         }
         .font(.caption)
         if showEstimateDetails {
-          Text(estimateDetail(estimate))
+          estimateDetail(estimate)
             .font(.caption2)
             .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
         }
         // Only the bottom chart carries dates; the others count weeks.
         dailyChart(entries: entries, weekNumbers: index < roles.count - 1)
+      }
+      if showEstimateDetails {
+        Text("Est. counts calendar days; ± is the estimate × (100% − confidence). "
+          + "A day of use is a day with a reported drop. Curve: once past cycles "
+          + "cover enough of the range, Est. follows their drain per 10% band.")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
       }
     }
   }
@@ -263,14 +270,30 @@ struct MenuContentView: View {
     return "Est: ~\(BatteryEstimator.formatCoarse(remaining)) ± \(BatteryEstimator.formatCoarse(halfWidth))"
   }
 
-  private func estimateDetail(_ estimate: BatteryEstimate) -> String {
-    let facts = "\(estimate.points) readings, \(BatteryEstimator.format(estimate.observedDischarge)) of discharge observed."
-    guard estimate.remaining != nil else { return facts }
-    let confidence = Int((estimate.confidence * 100).rounded())
-    let slopeError = Int((min(estimate.relativeError, 1) * 100).rounded())
-    return facts + " Estimation confidence \(confidence)%: discharge rate uncertain by ±\(slopeError)%, "
-      + "\(estimate.observedDrop) of \(estimate.observedDrop + estimate.level) battery points watched. "
-      + "The ± range is the estimate times the remaining \(100 - confidence)%."
+  private func estimateDetail(_ estimate: BatteryEstimate) -> some View {
+    func percent(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
+    return Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 1) {
+      detailRow("Readings", "\(estimate.points) over \(BatteryEstimator.format(estimate.observedDischarge))")
+      if estimate.remaining != nil {
+        detailRow("Drain watched", "\(estimate.observedDrop)% of a charge")
+        detailRow("Rate uncertainty", "±\(percent(min(estimate.relativeError, 1)))")
+        detailRow("Confidence", percent(estimate.confidence))
+        detailRow("Model", estimate.curveCycles > 0
+          ? "curve from \(estimate.curveCycles) cycle\(estimate.curveCycles == 1 ? "" : "s")"
+          : "straight line")
+      }
+      if let days = estimate.daysPerFullCharge {
+        detailRow("100% lasts", "~\(Int(days.rounded())) days of use")
+        detailRow("Days of use seen", "\(estimate.usageDays)")
+      }
+    }
+  }
+
+  private func detailRow(_ label: String, _ value: String) -> some View {
+    GridRow {
+      Text(label)
+      Text(value).monospacedDigit()
+    }
   }
 
   private func dailyChart(entries: [BatteryHistoryEntry], weekNumbers: Bool) -> some View {
@@ -302,8 +325,10 @@ struct MenuContentView: View {
         AxisGridLine()
         if weekNumbers {
           AxisValueLabel {
-            if let date = value.as(Date.self), let week = weekStarts.firstIndex(of: date) {
-              Text("W\(week + 1)")
+            // Weeks ago, counted from the current week on the right.
+            if let date = value.as(Date.self), let index = weekStarts.firstIndex(of: date) {
+              let weeksAgo = weekStarts.count - 1 - index
+              Text(weeksAgo == 0 ? "now" : "-\(weeksAgo)w")
             }
           }
         } else {

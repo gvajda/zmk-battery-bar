@@ -50,6 +50,101 @@ struct BatteryEstimatorTests {
     #expect(BatteryEstimator.cycles(e).map { $0.map(\.level) } == [[85, 84], [97, 96]])
   }
 
+  @Test("a slow +3 voltage rebound is not a charge")
+  func reboundIsNotCharge() {
+    // Seen on a real peripheral: 42 -> 45 over 8 h with no charger attached.
+    let e = entries([(40, 50), (30, 42), (29, 43), (27, 44), (22, 45), (10, 43), (0, 41)])
+    #expect(BatteryEstimator.cycles(e).count == 1)
+  }
+
+  @Test("days of use count calendar days with a reported drop")
+  func usageDays() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    let day: TimeInterval = 86400
+    let start = calendar.startOfDay(for: now).addingTimeInterval(-9 * day + 3600)
+    func at(_ d: Double, _ level: Int) -> BatteryHistoryEntry {
+      BatteryHistoryEntry(date: start.addingTimeInterval(d * day), keyboard: "kb", role: "central", level: level)
+    }
+    // Drops on days 0, 1 and 4 (two on day 4), a rise-only day 2, idle days 3 and 5-8.
+    let e = [at(0, 90), at(0.1, 85), at(1, 80), at(2, 81), at(4, 75), at(4.1, 70)]
+    let est = BatteryEstimator.estimate(entries: e, now: now, calendar: calendar)
+    #expect(est.usageDays == 3)
+    #expect(est.observedDrop == 20)
+    #expect(abs(est.daysPerFullCharge! - 100 * 3.0 / 20) < 1e-9)
+  }
+
+  @Test("a fully watched discharge counts as full coverage")
+  func fullCoverage() {
+    // A whole previous cycle plus part of the current one.
+    let e = entries([(300, 97), (200, 50), (100, 15), (99, 97), (0, 75)])
+    #expect(BatteryEstimator.estimate(entries: e, now: now).coverage == 1)
+  }
+
+  /// One reading per point from `from` down to `to`, ending `endHoursAgo`,
+  /// taking `hoursPerPoint(level)` to fall to each level.
+  private func discharge(
+    from: Int, to: Int, endHoursAgo: Double, hoursPerPoint: (Int) -> Double
+  ) -> [(hoursAgo: Double, level: Int)] {
+    var t = endHoursAgo
+    var points = [(hoursAgo: endHoursAgo, level: to)]
+    for level in to..<from {
+      t += hoursPerPoint(level)
+      points.insert((t, level + 1), at: 0)
+    }
+    return points
+  }
+
+  /// Seen on a real Piantor: ~2 points/day above 60%, ~7 below.
+  private let knee: (Int) -> Double = { $0 >= 60 ? 12 : 3 }
+
+  @Test("curve learns the pace per band and skips a band cut short by a charge")
+  func curveBands() {
+    let cycle = entries(discharge(from: 100, to: 15, endHoursAgo: 0, hoursPerPoint: knee))
+    let curve = BatteryEstimator.curve([cycle])!
+    #expect(curve.cycles == 1)
+    expectClose(curve.secondsPerPoint[9], 12 * 3600)
+    expectClose(curve.secondsPerPoint[2], 3 * 3600)
+    #expect(curve.secondsPerPoint[1] == nil)
+    // Bands 0 and 1 borrow band 2's pace.
+    expectClose(curve.time(from: 100, to: 0), Double(40 * 12 + 60 * 3) * 3600)
+  }
+
+  @Test("no curve until enough bands are measured")
+  func curveNeedsBands() {
+    let cycle = entries(discharge(from: 100, to: 60, endHoursAgo: 0, hoursPerPoint: knee))
+    #expect(BatteryEstimator.curve([cycle]) == nil)
+  }
+
+  @Test("right after a charge the estimate follows the previous cycle's curve")
+  func curveAfterCharge() {
+    let history = discharge(from: 100, to: 10, endHoursAgo: 1, hoursPerPoint: knee)
+    let est = BatteryEstimator.estimate(entries: entries(history + [(0, 100)]), now: now)
+    #expect(est.curveCycles == 1)
+    expectClose(est.remaining, Double(40 * 12 + 60 * 3) * 3600)
+  }
+
+  @Test("a cycle running faster than the curve shortens the estimate")
+  func curvePace() {
+    let history = discharge(from: 100, to: 10, endHoursAgo: 200, hoursPerPoint: knee)
+    // Twice the history's pace: 100 -> 80 in 120 h instead of 240 h.
+    let current = discharge(from: 100, to: 80, endHoursAgo: 0) { _ in 6 }
+    let est = BatteryEstimator.estimate(entries: entries(history + current), now: now)
+    let span = 120.0 * 3600
+    let w = span / (span + BatteryEstimator.blendHalfLife)
+    expectClose(est.remaining, Double(20 * 12 + 60 * 3) * 3600 * (w * 0.5 + 1 - w))
+  }
+
+  @Test("pace ignores a band the curve only borrowed")
+  func curvePaceSkipsBorrowedBand() {
+    // History never started above 89, so 90-100 borrows band 80-90's pace.
+    let history = discharge(from: 89, to: 10, endHoursAgo: 200, hoursPerPoint: knee)
+    // The real top band drops fast; below 90 the cycle matches history.
+    let current = discharge(from: 100, to: 84, endHoursAgo: 0) { $0 >= 90 ? 1 : 12 }
+    let est = BatteryEstimator.estimate(entries: entries(history + current), now: now)
+    expectClose(est.remaining, Double(24 * 12 + 60 * 3) * 3600)
+  }
+
   @Test("steady discharge: 1 point/hour, estimate measured from now")
   func steadyDischarge() {
     // Exactly linear, latest point at now, so the pseudo-point changes nothing.
@@ -151,7 +246,7 @@ struct BatteryEstimatorTests {
     #expect(jittery.halfWidth! / jittery.remaining! > straight.halfWidth! / straight.remaining!)
   }
 
-  @Test("confidence is zero without an estimate and never reaches one with battery left")
+  @Test("confidence is zero without an estimate and below one with any rate error")
   func confidenceBounds() {
     #expect(BatteryEstimator.estimate(entries: entries([(5, 50)]), now: now).confidence == 0)
     let e = entries([(300, 100), (200, 60), (100, 20), (0, 2)])
