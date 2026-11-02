@@ -47,16 +47,19 @@ struct BatteryEstimate: Equatable {
   let observedDrop: Int
   /// Current level, the part the estimate still has to extrapolate over.
   let level: Int
+  /// Calendar days with at least one reported drop. ZMK only samples the
+  /// battery while the keyboard is active, so a drop means it was used.
+  let usageDays: Int
 
-  /// Share of the extrapolation that is backed by observation. sqrt keeps the
-  /// early numbers from sitting near zero for a week.
+  /// Share of one full charge (100 points) seen discharging. Once a whole
+  /// battery's worth has been watched the rate is known across the curve.
+  /// sqrt keeps the early numbers from sitting near zero for a week.
   var coverage: Double {
-    let total = observedDrop + level
-    return total > 0 ? (Double(observedDrop) / Double(total)).squareRoot() : 0
+    min(Double(observedDrop) / 100, 1).squareRoot()
   }
 
-  /// 0...1: how straight the fit is, times how much of the battery has been
-  /// watched. Never reaches 1 while there is battery left to extrapolate.
+  /// 0...1: how straight the fit is, times how much of a charge has been
+  /// watched.
   var confidence: Double {
     remaining == nil ? 0 : max(0, 1 - min(relativeError, 1)) * coverage
   }
@@ -67,6 +70,16 @@ struct BatteryEstimate: Equatable {
   // into one number so the display and the ⓘ text agree.
   var halfWidth: TimeInterval? {
     remaining.map { $0 * (1 - confidence) }
+  }
+
+  /// Days of actual use a 100% charge lasts at the observed drain per used
+  /// day. Idle days (weekends, holidays) are left out, unlike `remaining`,
+  /// which runs on calendar time.
+  // ponytail: a lightly used day with no 1-point drop is not counted, which
+  // shortens this a little on low-drain sides.
+  var daysPerFullCharge: Double? {
+    guard remaining != nil, usageDays > 0, observedDrop > 0 else { return nil }
+    return 100 * Double(usageDays) / Double(observedDrop)
   }
 }
 
@@ -86,9 +99,11 @@ struct BatteryEstimate: Equatable {
 ///   drive `BatteryEstimate.confidence` and the ± range.
 enum BatteryEstimator {
   /// A level increase of at least this many points between consecutive
-  /// entries is treated as the start of a charge; readings can jitter by a
-  /// point or two under load, so single-point bumps are not.
-  static let chargeJump = 3
+  /// entries is treated as the start of a charge. Readings jitter by a point
+  /// or two under load and the voltage can rebound a few points at rest
+  /// (seen: +3 over 8 h with no charger), while a charge from any useful
+  /// depth climbs well past this.
+  static let chargeJump = 10
   /// A cycle contributes a rate (as history, or on its own as the current
   /// cycle) only with at least this much time and this much drop; a
   /// half-hour blip before a charge would otherwise dominate the blend.
@@ -117,12 +132,14 @@ enum BatteryEstimator {
   }
 
   /// `entries` must be for one keyboard/role, sorted by date ascending.
-  static func estimate(entries: [BatteryHistoryEntry], now: Date) -> BatteryEstimate {
+  static func estimate(
+    entries: [BatteryHistoryEntry], now: Date, calendar: Calendar = .current
+  ) -> BatteryEstimate {
     let entries = readings(entries)
-    func none(observed: TimeInterval = 0, drop: Int = 0, level: Int = 0) -> BatteryEstimate {
+    func none(observed: TimeInterval = 0, drop: Int = 0, level: Int = 0, days: Int = 0) -> BatteryEstimate {
       BatteryEstimate(
         remaining: nil, points: entries.count, observedDischarge: observed,
-        relativeError: 1, observedDrop: drop, level: level)
+        relativeError: 1, observedDrop: drop, level: level, usageDays: days)
     }
     guard let last = entries.last else { return none() }
 
@@ -133,6 +150,9 @@ enum BatteryEstimator {
     let currentSpan = span(current)
     let observed = cycles.reduce(currentSpan) { $0 + span($1) }
     let observedDrop = (cycles + [current]).reduce(0) { $0 + max(($1.first?.level ?? 0) - ($1.last?.level ?? 0), 0) }
+    let usageDays = Set((cycles + [current]).flatMap { cycle in
+      zip(cycle, cycle.dropFirst()).filter { $1.level < $0.level }.map { calendar.startOfDay(for: $1.date) }
+    }).count
 
     let currentFit = fit(current)
     let history = cycles.compactMap { cycle -> (rate: Double, weight: Double)? in
@@ -170,7 +190,7 @@ enum BatteryEstimator {
     }
 
     guard let rate, rate < 0 else {
-      return none(observed: observed, drop: observedDrop, level: last.level)
+      return none(observed: observed, drop: observedDrop, level: last.level, days: usageDays)
     }
     return BatteryEstimate(
       remaining: Double(last.level) / -rate,
@@ -178,7 +198,8 @@ enum BatteryEstimator {
       observedDischarge: observed,
       relativeError: relativeError,
       observedDrop: observedDrop,
-      level: last.level
+      level: last.level,
+      usageDays: usageDays
     )
   }
 

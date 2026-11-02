@@ -50,6 +50,37 @@ struct BatteryEstimatorTests {
     #expect(BatteryEstimator.cycles(e).map { $0.map(\.level) } == [[85, 84], [97, 96]])
   }
 
+  @Test("a slow +3 voltage rebound is not a charge")
+  func reboundIsNotCharge() {
+    // Seen on a real peripheral: 42 -> 45 over 8 h with no charger attached.
+    let e = entries([(40, 50), (30, 42), (29, 43), (27, 44), (22, 45), (10, 43), (0, 41)])
+    #expect(BatteryEstimator.cycles(e).count == 1)
+  }
+
+  @Test("days of use count calendar days with a reported drop")
+  func usageDays() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    let day: TimeInterval = 86400
+    let start = calendar.startOfDay(for: now).addingTimeInterval(-9 * day + 3600)
+    func at(_ d: Double, _ level: Int) -> BatteryHistoryEntry {
+      BatteryHistoryEntry(date: start.addingTimeInterval(d * day), keyboard: "kb", role: "central", level: level)
+    }
+    // Drops on days 0, 1 and 4 (two on day 4), a rise-only day 2, idle days 3 and 5-8.
+    let e = [at(0, 90), at(0.1, 85), at(1, 80), at(2, 81), at(4, 75), at(4.1, 70)]
+    let est = BatteryEstimator.estimate(entries: e, now: now, calendar: calendar)
+    #expect(est.usageDays == 3)
+    #expect(est.observedDrop == 20)
+    #expect(abs(est.daysPerFullCharge! - 100 * 3.0 / 20) < 1e-9)
+  }
+
+  @Test("a fully watched discharge counts as full coverage")
+  func fullCoverage() {
+    // A whole previous cycle plus part of the current one.
+    let e = entries([(300, 97), (200, 50), (100, 15), (99, 97), (0, 75)])
+    #expect(BatteryEstimator.estimate(entries: e, now: now).coverage == 1)
+  }
+
   @Test("steady discharge: 1 point/hour, estimate measured from now")
   func steadyDischarge() {
     // Exactly linear, latest point at now, so the pseudo-point changes nothing.
@@ -151,7 +182,7 @@ struct BatteryEstimatorTests {
     #expect(jittery.halfWidth! / jittery.remaining! > straight.halfWidth! / straight.remaining!)
   }
 
-  @Test("confidence is zero without an estimate and never reaches one with battery left")
+  @Test("confidence is zero without an estimate and below one with any rate error")
   func confidenceBounds() {
     #expect(BatteryEstimator.estimate(entries: entries([(5, 50)]), now: now).confidence == 0)
     let e = entries([(300, 100), (200, 60), (100, 20), (0, 2)])
