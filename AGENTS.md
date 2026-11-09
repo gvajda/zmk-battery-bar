@@ -65,7 +65,7 @@ Notes:
 - `Sources/ZMKBatteryBar/App/AppDelegate.swift` - NSStatusItem, status bar panel, render timer
 - `Sources/ZMKBatteryBar/BLE/`
   - `BLEManager.swift` - CoreBluetooth central: scanning, connection, reconnect, battery notifications
-  - `BatteryStateComposer.swift`, `BatteryPayload.swift`, `DescriptorRoleParser.swift`, `RoleAssigner.swift`, `ReconnectBackoff.swift` - pure logic extracted from BLEManager (see Testing)
+  - `BatteryStateComposer.swift`, `BatteryPayload.swift`, `DescriptorRoleParser.swift`, `RoleAssigner.swift`, `ReconnectBackoff.swift`, `LayerIndicator.swift` - pure logic extracted from BLEManager (see Testing)
 - `Sources/ZMKBatteryBar/Views/` - SwiftUI: `StatusBarView` (menu bar content), `MenuContentView` (panel), `KeyboardListView` (scan/save/manage keyboards), `BatteryIconView` (pixel-snapped battery icon)
 - `Sources/ZMKBatteryBar/Models/` - `BatteryState` (@Observable), `AppSettings` (UserDefaults-backed), `KeyboardDevice` (saved keyboard + label config), `PanelNavigation`
 - `Sources/ZMKBatteryBar/Utilities/` - `LaunchAtLogin` (SMAppService), `StatusBarLayout`, `TimeAgoFormatter`
@@ -91,7 +91,7 @@ Notes:
 CoreBluetooth is not unit-testable, so BLE/UI logic that can be expressed as a
 pure function lives in small standalone enums/structs (`BatteryStateComposer`,
 `RoleAssigner`, `DescriptorRoleParser`, `ReconnectBackoff`, `BatteryPayload`,
-`StatusBarLayout`, `BatteryIconLayout`, `TimeAgoFormatter`) with tests under
+`LayerIndicator`, `StatusBarLayout`, `BatteryIconLayout`, `TimeAgoFormatter`) with tests under
 `Tests/ZMKBatteryBarTests/` mirroring the source layout. When adding logic to
 `BLEManager` or views, prefer extracting it into a testable helper the same way.
 
@@ -120,6 +120,9 @@ been the subject of a real bug:
   `stopPollingTimer` / `resetCharacteristicState` / `batteryState.reset` triple
   must not be duplicated across recovery paths — duplicating it caused both
   double `@Observable` invalidation and drift between paths.
+- **The layer status service is optional.** It is discovered alongside the
+  Battery Service but must never count toward `pendingCharacteristicDiscoveries`
+  or the "no battery characteristics" verdict — stock firmware lacks it.
 - Log discovery errors **before** any identity guard, otherwise errors for
   superseded peripherals are silently swallowed — exactly the flakiness class
   these code paths exist to diagnose.

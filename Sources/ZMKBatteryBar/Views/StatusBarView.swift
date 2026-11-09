@@ -12,6 +12,8 @@ struct StatusBarView: View {
   /// with a slightly larger font and a taller battery icon. The icon width is
   /// unchanged from the two-line layout.
   var singleLine: Bool = false
+  /// Active layer indicator (e.g. "G"), drawn before the battery rows.
+  var layerLabel: String? = nil
 
   private static let labelFont = Font.system(size: 11, weight: .semibold, design: .rounded)
   private static let singleLineFont = Font.system(size: 13, weight: .semibold, design: .rounded)
@@ -23,10 +25,19 @@ struct StatusBarView: View {
   private static let singleLineIconHeight: CGFloat = 10
 
   var body: some View {
-    if singleLine {
-      singleLineBody
-    } else {
-      twoLineBody
+    HStack(spacing: 3) {
+      if let layerLabel {
+        Text(layerLabel)
+          .font(Self.singleLineFont)
+          .lineLimit(1)
+          .fixedSize()
+          .padding(.leading, 1)
+      }
+      if singleLine {
+        singleLineBody
+      } else {
+        twoLineBody
+      }
     }
   }
 

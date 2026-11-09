@@ -18,6 +18,9 @@ struct KeyboardDevice: Identifiable, Codable {
   /// Per-peripheral custom labels, indexed by peripheral position.
   /// e.g. ["L", "R"] means P1=L, P2=R.
   var peripheralLabels: [String]
+  /// Menu bar text per keyboard layer, keyed by layer name (from the firmware's
+  /// layer status service). Missing or empty = layer shows nothing.
+  var layerLabels: [String: String]
 
   var id: String { uuid }
 
@@ -26,17 +29,19 @@ struct KeyboardDevice: Identifiable, Codable {
     name: String,
     labelStyle: SideLabelStyle = .centralPeripheral,
     swapSides: Bool = false,
-    peripheralLabels: [String] = []
+    peripheralLabels: [String] = [],
+    layerLabels: [String: String] = [:]
   ) {
     self.uuid = uuid
     self.name = name
     self.labelStyle = labelStyle
     self.swapSides = swapSides
     self.peripheralLabels = peripheralLabels
+    self.layerLabels = layerLabels
   }
 
   private enum CodingKeys: String, CodingKey {
-    case uuid, name, labelStyle, swapSides, peripheralLabels
+    case uuid, name, labelStyle, swapSides, peripheralLabels, layerLabels
   }
 
   init(from decoder: Decoder) throws {
@@ -46,6 +51,13 @@ struct KeyboardDevice: Identifiable, Codable {
     labelStyle = try container.decodeIfPresent(SideLabelStyle.self, forKey: .labelStyle) ?? .centralPeripheral
     swapSides = try container.decodeIfPresent(Bool.self, forKey: .swapSides) ?? false
     peripheralLabels = try container.decodeIfPresent([String].self, forKey: .peripheralLabels) ?? []
+    layerLabels = try container.decodeIfPresent([String: String].self, forKey: .layerLabels) ?? [:]
+  }
+
+  /// Sets the menu bar text for `layer`; nil or blank removes it.
+  mutating func setLayerLabel(_ label: String?, forLayer layer: String) {
+    let trimmed = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    layerLabels[layer] = trimmed.isEmpty ? nil : trimmed
   }
 
   func labelShort(for side: KeyboardSide) -> String {
