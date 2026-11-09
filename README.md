@@ -25,6 +25,7 @@ A macOS menu bar app that displays battery levels from ZMK split keyboards via B
 - **Swap battery positions** — Optionally swap the order of the two battery rows in the menu bar
 - **Auto-reconnect** — Automatically reconnects with exponential backoff when the keyboard disconnects
 - **Auto-switch to the active keyboard** — Optionally follow whichever saved keyboard you are typing on (requires the Input Monitoring permission; only the source device of each key press is read, never the keys themselves)
+- **Layer indicator (optional firmware module)** — Show custom text (e.g. `G`) in the menu bar while chosen layers are active. Needs a small firmware module that exposes the active layers over a custom GATT service — see [`layer_status_gatt.c`](https://github.com/gvajda/zmk-config/blob/main/src/layer_status_gatt.c) for the reference implementation and UUIDs; re-pair the keyboard after flashing it. Configure per layer under **Layer Indicator** in the panel
 - **Launch at Login** — Optional auto-start via SMAppService
 
 ## Requirements

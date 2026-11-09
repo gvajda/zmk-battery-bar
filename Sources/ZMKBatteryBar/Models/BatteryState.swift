@@ -19,6 +19,10 @@ final class BatteryState {
   var centralConnected: Bool = false
   var peripherals: [PeripheralBattery] = []
   var lastUpdated: Date? = nil
+  /// Layer status from the firmware's optional layer service (see
+  /// `LayerIndicator`). Per-connection like the levels, so `reset` clears it.
+  var layerNames: [String] = []
+  var activeLayerMask: UInt32? = nil
 
   /// First peripheral's level — used by StatusBarView for backward compat.
   var peripheralLevel: Int? { peripherals.first?.level }
@@ -39,5 +43,7 @@ final class BatteryState {
     centralConnected = false
     peripherals = []
     lastUpdated = nil
+    layerNames = []
+    activeLayerMask = nil
   }
 }

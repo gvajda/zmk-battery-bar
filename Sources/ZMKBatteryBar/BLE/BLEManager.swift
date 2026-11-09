@@ -27,12 +27,20 @@ final class BLEManager: NSObject, ObservableObject, @preconcurrency CBCentralMan
   private static let batteryServiceUUID = CBUUID(string: "180F")
   private static let batteryLevelCharacteristicUUID = CBUUID(string: "2A19")
   private static let characteristicUserDescriptionUUID = CBUUID(string: "2901")
+  // Optional layer status service from the zmk-config `layer_status_gatt`
+  // module. Absent on stock firmware; battery handling never depends on it.
+  private static let layerServiceUUID = CBUUID(string: "F8066FA3-1254-4931-A2CA-F24F572961B6")
+  private static let layerStateUUID = CBUUID(string: "36FC306E-8D90-414C-81EE-052A5F4BF37E")
+  private static let layerNamesUUID = CBUUID(string: "5D03CE99-6B0D-4883-BAC7-3B5708296AB9")
 
   // MARK: - Published Properties
 
   @Published var discoveredDevices: [DiscoveredDevice] = []
   @Published var isScanning: Bool = false
   @Published var bluetoothState: CBManagerState = .unknown
+  /// Called on every layer status update so the menu bar redraws at once
+  /// instead of on the next render tick.
+  var onLayerChange: (() -> Void)?
 
   // MARK: - State
 
@@ -403,7 +411,7 @@ final class BLEManager: NSObject, ObservableObject, @preconcurrency CBCentralMan
     // Repeated discovery failures still back off via discoveryFailureStreak.
     reconnectDelay = Self.initialReconnectDelay
     resetCharacteristicState()
-    peripheral.discoverServices([Self.batteryServiceUUID])
+    peripheral.discoverServices([Self.batteryServiceUUID, Self.layerServiceUUID])
     startPollingTimer()
   }
 
@@ -444,7 +452,9 @@ final class BLEManager: NSObject, ObservableObject, @preconcurrency CBCentralMan
       )
       return
     }
-    guard let services = peripheral.services, !services.isEmpty else {
+    let services = peripheral.services ?? []
+    let batteryServices = services.filter { $0.uuid == Self.batteryServiceUUID }
+    guard !batteryServices.isEmpty else {
       recoverFromDiscoveryFailure(
         peripheral: peripheral,
         message: "Service discovery returned no battery services"
@@ -452,9 +462,12 @@ final class BLEManager: NSObject, ObservableObject, @preconcurrency CBCentralMan
       return
     }
     guard peripheral.identifier == connectedPeripheral?.identifier else { return }
-    pendingCharacteristicDiscoveries = services.count
-    for service in services {
+    pendingCharacteristicDiscoveries = batteryServices.count
+    for service in batteryServices {
       peripheral.discoverCharacteristics([Self.batteryLevelCharacteristicUUID], for: service)
+    }
+    for service in services where service.uuid == Self.layerServiceUUID {
+      peripheral.discoverCharacteristics([Self.layerStateUUID, Self.layerNamesUUID], for: service)
     }
   }
 
@@ -465,6 +478,18 @@ final class BLEManager: NSObject, ObservableObject, @preconcurrency CBCentralMan
   ) {
     if let error {
       print("[BLEManager] Characteristic discovery error: \(error.localizedDescription)")
+    }
+    // The layer service is optional and kept out of the battery discovery
+    // bookkeeping (pendingCharacteristicDiscoveries) entirely.
+    if service.uuid == Self.layerServiceUUID {
+      guard error == nil, peripheral.identifier == connectedPeripheral?.identifier else { return }
+      for characteristic in service.characteristics ?? [] {
+        if characteristic.uuid == Self.layerStateUUID {
+          peripheral.setNotifyValue(true, for: characteristic)
+        }
+        peripheral.readValue(for: characteristic)
+      }
+      return
     }
     guard peripheral.identifier == connectedPeripheral?.identifier,
           pendingCharacteristicDiscoveries > 0
@@ -565,8 +590,20 @@ final class BLEManager: NSObject, ObservableObject, @preconcurrency CBCentralMan
     guard peripheral.identifier == connectedPeripheral?.identifier else { return }
 
     if let error {
-      print("[BLEManager] Battery read error: \(error.localizedDescription)")
+      print("[BLEManager] Read error (\(characteristic.uuid)): \(error.localizedDescription)")
       return
+    }
+    switch characteristic.uuid {
+    case Self.layerStateUUID:
+      batteryState.activeLayerMask = LayerIndicator.parseActiveMask(from: characteristic.value)
+      onLayerChange?()
+      return
+    case Self.layerNamesUUID:
+      batteryState.layerNames = LayerIndicator.parseNames(from: characteristic.value)
+      onLayerChange?()
+      return
+    default:
+      break
     }
     guard let level = BatteryPayload.parseLevel(from: characteristic.value) else { return }
     latestBatteryLevels[characteristic] = level

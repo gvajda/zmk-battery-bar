@@ -16,12 +16,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private static let logger = Logger(subsystem: "com.zmk-battery-bar.app", category: "AppDelegate")
 
   private var lastRenderedRows: [StatusBarRow] = []
+  private var lastRenderedLayerLabel: String?
   private var renderTimer: Timer?
   private var panelLayoutScheduled = false
   private var appearanceObservation: NSKeyValueObservation?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     bleManager = BLEManager(batteryState: batteryState, batteryHistory: batteryHistory, appSettings: appSettings)
+    bleManager.onLayerChange = { [weak self] in
+      self?.updateButtonImageIfNeeded()
+    }
 
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -125,7 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   @MainActor private func updateButtonImageIfNeeded() {
     let rows = currentStatusBarRows()
-    guard rows != lastRenderedRows else { return }
+    guard rows != lastRenderedRows || currentLayerLabel() != lastRenderedLayerLabel else { return }
     renderStatusBar(rows: rows)
   }
 
@@ -135,6 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   @MainActor private func renderStatusBar(rows: [StatusBarRow]) {
     guard let button = statusItem.button else { return }
+    let layerLabel = currentLayerLabel()
 
     let renderScale = button.window?.screen?.backingScaleFactor
       ?? NSScreen.main?.backingScaleFactor
@@ -156,7 +161,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       displayMode: appSettings.statusBarDisplayMode,
       lowBatteryThreshold: threshold,
       foregroundColor: foregroundColor,
-      singleLine: appSettings.singleLineLayout
+      singleLine: appSettings.singleLineLayout,
+      layerLabel: layerLabel
     )
     .environment(\.displayScale, renderScale)
     let renderer = ImageRenderer(content: content)
@@ -173,6 +179,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // render is retried on the next tick instead of being skipped as
     // already-rendered.
     lastRenderedRows = rows
+    lastRenderedLayerLabel = layerLabel
+  }
+
+  @MainActor private func currentLayerLabel() -> String? {
+    LayerIndicator.label(
+      activeMask: batteryState.activeLayerMask,
+      names: batteryState.layerNames,
+      labels: appSettings.selectedKeyboard?.layerLabels ?? [:]
+    )
   }
 
   @MainActor private func currentStatusBarRows() -> [StatusBarRow] {

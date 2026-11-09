@@ -165,3 +165,29 @@ struct KeyboardDeviceTests {
     #expect(device.hasValidPeripheralLabels(count: 2) == false)
   }
 }
+
+@Suite("KeyboardDevice layer labels")
+struct KeyboardDeviceLayerLabelTests {
+  @Test("missing layerLabels decodes as empty, and labels round-trip")
+  func decodeAndRoundTrip() throws {
+    let legacy = #"{"uuid":"abc","name":"Corne"}"#
+    let decoded = try JSONDecoder().decode(KeyboardDevice.self, from: Data(legacy.utf8))
+    #expect(decoded.layerLabels.isEmpty)
+
+    var kb = decoded
+    kb.setLayerLabel("G", forLayer: "GAME")
+    let again = try JSONDecoder().decode(KeyboardDevice.self, from: JSONEncoder().encode(kb))
+    #expect(again.layerLabels == ["GAME": "G"])
+  }
+
+  @Test("blank or nil label removes the entry")
+  func clears() {
+    var kb = KeyboardDevice(uuid: "abc", name: "Corne", layerLabels: ["GAME": "G"])
+    kb.setLayerLabel("  ", forLayer: "GAME")
+    #expect(kb.layerLabels.isEmpty)
+    kb.setLayerLabel(" G ", forLayer: "GAME")
+    #expect(kb.layerLabels == ["GAME": "G"])
+    kb.setLayerLabel(nil, forLayer: "GAME")
+    #expect(kb.layerLabels.isEmpty)
+  }
+}

@@ -72,6 +72,11 @@ struct MenuContentView: View {
           .foregroundStyle(.secondary)
       }
 
+      // Only firmware with the layer status service reports layer names.
+      if let keyboard, !batteryState.layerNames.isEmpty {
+        layerSection(keyboard: keyboard)
+      }
+
       Divider()
 
       Picker("Show", selection: $displayMode) {
@@ -178,6 +183,66 @@ struct MenuContentView: View {
     if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") {
       NSWorkspace.shared.open(url)
     }
+  }
+
+  // MARK: - Layer indicator
+
+  private func layerSection(keyboard: KeyboardDevice) -> some View {
+    DisclosureGroup("Layer Indicator") {
+      VStack(alignment: .leading, spacing: 2) {
+        ForEach(Array(batteryState.layerNames.enumerated()), id: \.offset) { index, name in
+          layerRow(index: index, name: name, keyboard: keyboard)
+        }
+      }
+      .id(labelStyleTick)
+    }
+  }
+
+  private func layerRow(index: Int, name: String, keyboard: KeyboardDevice) -> some View {
+    let active = index < 32 && (batteryState.activeLayerMask ?? 0) & (1 << index) != 0
+    let current = keyboard.layerLabels[name]
+    return HStack(spacing: 6) {
+      Circle()
+        .fill(active ? Color.green : Color.secondary.opacity(0.3))
+        .frame(width: 6, height: 6)
+      Text(name)
+        .lineLimit(1)
+      Spacer()
+      // ponytail: mouse-only choices plus an NSAlert for custom text, since
+      // the panel may not take keyboard focus.
+      Menu(current ?? "Off") {
+        Button("Off") { setLayerLabel(nil, for: name, keyboard: keyboard.uuid) }
+        Button(String(name.prefix(1))) { setLayerLabel(String(name.prefix(1)), for: name, keyboard: keyboard.uuid) }
+        if name.count > 1 {
+          Button(name) { setLayerLabel(name, for: name, keyboard: keyboard.uuid) }
+        }
+        Divider()
+        Button("Custom…") { promptLayerLabel(for: name, current: current, keyboard: keyboard.uuid) }
+      }
+      .menuStyle(.borderlessButton)
+      .fixedSize()
+    }
+  }
+
+  private func setLayerLabel(_ label: String?, for layer: String, keyboard uuid: String) {
+    appSettings.updateKeyboard(uuid: uuid) { $0.setLayerLabel(label, forLayer: layer) }
+    labelStyleTick &+= 1
+    onLabelChange()
+  }
+
+  private func promptLayerLabel(for layer: String, current: String?, keyboard uuid: String) {
+    let alert = NSAlert()
+    alert.messageText = "Menu bar text for \(layer)"
+    alert.informativeText = "Shown while this layer is active. Leave empty to show nothing."
+    let field = NSTextField(string: current ?? "")
+    field.frame = NSRect(x: 0, y: 0, width: 200, height: 24)
+    alert.accessoryView = field
+    alert.addButton(withTitle: "Save")
+    alert.addButton(withTitle: "Cancel")
+    alert.window.initialFirstResponder = field
+    NSApp.activate()
+    guard alert.runModal() == .alertFirstButtonReturn else { return }
+    setLayerLabel(field.stringValue, for: layer, keyboard: uuid)
   }
 
   private func batteryRow(
